@@ -5,9 +5,8 @@ sequence, not evidence of a completed or approved integration.
 
 ## Recording setup
 
-Use a local verification build with
-`SPRINGROLL_GOOGLE_OAUTH_WRITE_STAGING=1` and synthetic messages, calendars, and
-Drive files. Keep the shared Google project's publishing status In production.
+Use a current local build with synthetic messages, calendars, and
+Drive files. Gmail sending/drafts and Calendar changes are available in normal setup. Keep the shared Google project's publishing status In production.
 Confirm the recording account and selected AI account/tier before recording;
 keep private account details, credentials, and the final video outside Git.
 

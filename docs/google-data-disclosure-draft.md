@@ -1,10 +1,8 @@
 # Google data disclosure draft
 
-Prepared September 7, 2026. This is review copy, not a published compliance
-attestation. Do not publish the affirmative statement until the
-[AI-data audit](google-ai-data-audit.md) gaps are resolved. The current in-app
-Google account page now discloses remote processing and that account-level
-training settings are not verified.
+Updated September 16, 2026 for the implementation branch. Review copy; public
+publication remains pending account/endpoint evidence and acceptance testing.
+See [implemented controls and remaining work](google-zdr-implementation.md).
 
 ## Website Google-data section replacement
 
@@ -15,20 +13,24 @@ sending/drafts and Calendar event changes are currently limited to verification
 staging. Drive access is read-only.
 
 When you use Google data in a chat or recipe, relevant emails, events, files, and
-metadata are included in requests to your selected AI provider. The app stores
-credentials locally and can retain Google-derived reports, conversation history,
-and tool activity on your Mac. Selecting another model or using another tool
-with those results can send relevant content to another service. Local execution
-of Springroll does not mean AI inference stays on your Mac.
+metadata are sent through OpenRouter to supported Zero Data Retention inference
+endpoints. Springroll sets OpenRouter's ZDR routing flag on each applicable request;
+OpenRouter selects eligible endpoints for the user's chosen model. Springroll does
+not impose a fixed model or hosting-provider list and never retries without ZDR
+when eligible routes are unavailable. Local execution does not mean AI processing stays on your Mac.
 
-Supported model connections include OpenAI API, Anthropic API, Google Gemini API,
-xAI API, Groq, OpenRouter, Claude subscription, and Codex/ChatGPT subscription.
-OpenRouter can route requests to downstream inference providers. These services
-have different training and retention policies; account tiers and opt-ins matter.
-Springroll currently does not verify those settings or isolate Google-derived
-content from every other model/tool route. Do not use Google data with services
-that train generalized models on the data. A no-retention option and a no-training
-policy are separate controls.
+Credentials, reports, conversation history, and activity can be stored on your Mac.
+Protection persists for Google-derived chats and recipes: they cannot switch to
+unrestricted AI providers or unverified image-generation routes. External integrations, web search and integration research remain available under normal tool permissions and approvals.
+Shared workspace lists and legacy conversations are conservatively protected because
+they may contain Google-derived information. Other model connections can still be
+used for separate work that does not access protected content.
+
+OpenRouter account settings and applicable agreements also govern processing.
+Prompt logging and data sharing must remain off. Provider-specific exceptions,
+including bring-your-own-key agreements, require separate verification. OpenRouter's
+ZDR definition permits implicit in-memory prompt caching. The routing flag does not
+make every feature or setting in a user's OpenRouter account ZDR.
 
 Google access does not authorize generalized-model training. Springroll does not
 sell Google data or use it for advertising. Disconnecting an account stops future
@@ -47,17 +49,11 @@ purposes.
 
 ## Publication checklist
 
-- Replace the older Gmail “Drafts and organize” and Drive write descriptions.
-- Inventory provider accounts/routes and document what training settings are
-  known or user-controlled; do not imply an enforced provider allowlist.
-- Preserve the owner's decision to keep model and endpoint choice unrestricted.
-  Explain this architecture in the review; the proposed affirmative statement
-  above remains unsubstantiated and must not be presented as current behavior.
-- Confirm retention/deletion statements for the documented services.
-- Publish the accurate final version at the privacy-policy URL and add the
-  affirmative statement in-app or on the website, as Google's reviewer requested.
-- Include the exact live URL and provider inventory in the reviewer reply.
+- Confirm actual API plans, no-training terms, logging/sharing settings and BYOK exceptions.
+- Complete real synthetic-data acceptance checks and collect the exact route evidence.
+- Publish the final section and affirmative statement at the privacy-policy URL.
+- Include the live URL, provider/model/endpoint inventory, plan details, controls,
+  and updated demo in the reviewer reply.
 
-No self-hosted/offline disclosure is appropriate for the currently supported
-model routes: local CLI launch and local credential storage do not make their
-inference offline.
+No provider account settings were changed and no website update or reviewer email
+was published as part of this implementation.

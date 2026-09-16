@@ -1,5 +1,8 @@
 # Google data and AI provider audit
 
+**Historical audit.** The September 16 implementation supersedes the unrestricted
+routing described below. See [current ZDR controls and remaining evidence](google-zdr-implementation.md).
+
 Reviewed September 7, 2026 against the current shared-auth branch and linked
 primary documentation. This is a code/policy audit, **not a compliance
 certification**. No provider dashboard settings, account tiers, contracts, or

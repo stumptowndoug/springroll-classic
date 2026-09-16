@@ -3331,15 +3331,28 @@ main {
   font-weight: 650;
 }
 
-.combo-provider-filter select {
+.model-catalog-panel {
+  overflow: visible;
+}
+
+.combo-provider-filter .model-filter-picker {
   width: min(230px, 65%);
+  min-width: 0;
+}
+
+.combo-provider-filter .model-filter-picker .combo-trigger {
+  width: 100%;
   min-height: 32px;
-  padding: 5px 28px 5px 9px;
+  padding: 5px 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background-color: var(--surface);
+  background: var(--surface);
   color: var(--fg);
   font-size: 0.8125rem;
+}
+
+.model-filter-picker .combo-panel {
+  width: min(230px, 75vw);
 }
 
 .combo-panel.align-end {
@@ -5986,4 +5999,9 @@ main {
 }
 .reset-confirmation [role="alert"] {
   color: var(--danger);
+}
+
+.model-picker .combo-option[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

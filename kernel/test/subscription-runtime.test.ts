@@ -22,9 +22,13 @@ async function fixture(withLink = false) {
   const pkg = join(root, "package");
   await mkdir(pkg);
   const executable = join(pkg, "codex");
-  await writeFile(executable, '#!/bin/sh\nprintf "codex-cli 0.153.2\\n"\n', {
-    mode: 0o755,
-  });
+  await writeFile(
+    executable,
+    '#!/bin/sh\nif [ "$1" = "app-server" ]; then printf "app-server --stdio\\n"; else printf "codex-cli 0.153.2\\n"; fi\n',
+    {
+      mode: 0o755,
+    },
+  );
   await writeFile(join(pkg, "LICENSE"), "Test fixture license");
   if (withLink) await symlink("/tmp", join(pkg, "outside"));
   const archive = join(root, "support.tgz");
@@ -62,11 +66,16 @@ async function finish(manager: SubscriptionRuntimeManager) {
   throw new Error("Installer did not settle");
 }
 
-test("accepts tested version family and rejects older or unrelated CLIs", () => {
+test("validates managed download versions against the manifest", () => {
   expect(compatibleRuntimeVersion("codex-cli 0.153.2", "0.153.2")).toBe(true);
   expect(compatibleRuntimeVersion("0.153.9", "0.153.2")).toBe(true);
   expect(compatibleRuntimeVersion("0.153.1", "0.153.2")).toBe(false);
-  expect(compatibleRuntimeVersion("0.154.0", "0.153.2")).toBe(false);
+  expect(compatibleRuntimeVersion("0.154.0", "0.153.2")).toBe(true);
+  expect(compatibleRuntimeVersion("1.0.0", "0.153.2")).toBe(true);
+  expect(compatibleRuntimeVersion("2.2.0 (Claude Code)", "2.1.260")).toBe(true);
+  expect(compatibleRuntimeVersion("2.1.259 (Claude Code)", "2.1.260")).toBe(
+    false,
+  );
   expect(compatibleRuntimeVersion("unknown", "0.153.2")).toBe(false);
 });
 
@@ -226,7 +235,7 @@ test("cancels an unfinished download and allows a fresh retry", async () => {
   }
 });
 
-test("falls back to explicit support download for an older CLI", async () => {
+test("falls back to explicit support download when required commands are absent", async () => {
   const f = await fixture();
   try {
     await writeFile(f.executable, '#!/bin/sh\nprintf "codex-cli 0.100.0\\n"\n');
@@ -248,3 +257,71 @@ test("falls back to explicit support download for an older CLI", async () => {
     await f.dispose();
   }
 });
+
+test.each([
+  {
+    id: "codex" as const,
+    installed: "codex-cli 0.100.0",
+    downloadedVersion: "0.153.2",
+    help: "app-server --stdio",
+  },
+  {
+    id: "claude" as const,
+    installed: "2.1.100 (Claude Code)",
+    downloadedVersion: "2.1.260",
+    help: "--input-format --output-format stream-json --mcp-config --strict-mcp-config --permission-mode --permission-prompts --setting-sources --settings --no-session-persistence --tools",
+  },
+  {
+    id: "codex" as const,
+    installed: "codex-cli 0.154.0",
+    downloadedVersion: "0.153.2",
+    help: "app-server --stdio",
+  },
+  {
+    id: "claude" as const,
+    installed: "2.2.0 (Claude Code)",
+    downloadedVersion: "2.1.260",
+    help: "--input-format --output-format stream-json --mcp-config --strict-mcp-config --permission-mode --permission-prompts --setting-sources --settings --no-session-persistence --tools",
+  },
+])(
+  "reuses installed $id $installed when integration commands are available",
+  async ({ id, installed, downloadedVersion, help }) => {
+    const f = await fixture();
+    try {
+      const script = (supported: boolean) =>
+        `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s\\n' '${installed}'; else printf '%s\\n' '${supported ? help : "unrelated command"}'; fi\n`;
+      await writeFile(f.executable, script(true));
+      let downloads = 0;
+      const options = {
+        root: f.cache,
+        specs: { [id]: { ...f.spec, cliVersion: downloadedVersion } },
+        candidates: () => [f.executable],
+        fetch: (async () => {
+          downloads++;
+          throw new Error("Unexpected download");
+        }) as unknown as typeof fetch,
+      };
+      const manager = new SubscriptionRuntimeManager(options);
+      expect(await manager.status(id)).toMatchObject({
+        state: "ready",
+        source: "existing",
+        version: installed,
+      });
+      expect(await manager.require(id)).toBe(f.executable);
+      expect(await manager.install(id)).toMatchObject({
+        state: "ready",
+        source: "existing",
+      });
+      expect(downloads).toBe(0);
+      await writeFile(f.executable, script(false));
+      const changed = new SubscriptionRuntimeManager(options);
+      expect(await changed.status(id)).toMatchObject({
+        state: "missing",
+        error: expect.stringContaining("integration commands"),
+      });
+      expect(downloads).toBe(0);
+    } finally {
+      await f.dispose();
+    }
+  },
+);

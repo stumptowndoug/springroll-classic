@@ -348,7 +348,7 @@ describe("AiSdkAssistant", () => {
       const assistant = new AiSdkAssistant(local.db, {
         loadRuntime: async (selection, context) => {
           loaded = selection;
-          if (context) loadedTurnId = context.turnId;
+          if (context?.turnId) loadedTurnId = context.turnId;
           return {
             model,
             provider: selection?.providerId ?? "mock-provider",
@@ -3163,6 +3163,58 @@ describe("AiSdkAssistant", () => {
         status: "failed",
         error: expect.stringContaining("cannot read image attachments"),
       });
+    } finally {
+      local.close();
+    }
+  });
+
+  test("keeps Google-derived titles on the protected conversation model", async () => {
+    const local = openLocalDatabase({ filename: ":memory:" });
+    try {
+      const protectedModel = new MockLanguageModelV4({
+        doStream: responseStream("Summary of Google mail."),
+        doGenerate: {
+          content: [{ type: "text", text: "Google Mail Summary" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        },
+      });
+      let distillerLoaded = false;
+      const titleSessions: string[] = [];
+      const assistant = new AiSdkAssistant(local.db, {
+        loadRuntime: async (_selection, context) => {
+          if (context?.purpose === "title" && context.sessionId)
+            titleSessions.push(context.sessionId);
+          return {
+            model: protectedModel,
+            provider: "openrouter",
+            modelId: "openai/gpt-5.4-mini",
+            googleDataProtected: true,
+          };
+        },
+        loadDistillerRuntime: async () => {
+          distillerLoaded = true;
+          throw new Error(
+            "Unrestricted distiller must not receive Google data",
+          );
+        },
+      });
+      const session = assistant.createSession();
+      await (
+        await assistant.respond(
+          session.id,
+          userMessage("Summarize Google mail"),
+        )
+      ).text();
+      await waitFor(
+        () =>
+          assistant.getSession(session.id)?.session.title ===
+          "Google Mail Summary",
+      );
+      expect(distillerLoaded).toBe(false);
+      expect(titleSessions).toContain(session.id);
+      expect(protectedModel.doGenerateCalls.length).toBeGreaterThan(0);
     } finally {
       local.close();
     }

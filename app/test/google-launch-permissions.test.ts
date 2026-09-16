@@ -6,67 +6,17 @@ import {
   parseConnectorManifest,
 } from "@springroll/kernel";
 import { curatedConnectorManifests } from "../src/server/connector-registry.ts";
-import { googleLaunchManifest } from "../src/server/google-launch-permissions.ts";
 
-function manifest(id: string, staging = false) {
+function manifest(id: string) {
   const source = curatedConnectorManifests.find((item) => item.id === id);
   if (!source) throw new Error(`Missing ${id}`);
-  return parseConnectorManifest(googleLaunchManifest(source, staging));
+  return parseConnectorManifest(source);
 }
 
-describe("Google launch permission boundary", () => {
-  test("production omits write tools and rejects both new and legacy upgrades", () => {
-    for (const id of ["gmail", "google-calendar", "google-drive"]) {
-      const current = manifest(id);
-      if (current.transport.kind !== "http-api")
-        throw new Error("Expected native API");
-      expect(
-        current.transport.operations.every(
-          (operation) => operation.effect === "read",
-        ),
-      ).toBe(true);
-      expect(
-        grantedOAuthPermissionSetIds(
-          {
-            grantedPermissionSets: [
-              "read",
-              "send",
-              "drafts",
-              "organize",
-              "write",
-            ],
-          },
-          current,
-        ),
-      ).toEqual(["read"]);
-      for (const extra of ["send", "drafts", "organize", "write"]) {
-        expect(() => nextOAuthPermissionSetIds(current, {}, extra)).toThrow();
-      }
-      expect(
-        oauthScopeForPermissionSets(current, [
-          "read",
-          "send",
-          "drafts",
-          "write",
-        ]),
-      ).not.toMatch(
-        /gmail\.(compose|send|modify)|calendar\.events|auth\/drive(?: |$)/,
-      );
-      expect(
-        current.tools?.allow?.every(
-          (name) =>
-            current.transport.kind === "http-api" &&
-            current.transport.operations.some(
-              (operation) => operation.name === name,
-            ),
-        ),
-      ).toBe(true);
-    }
-  });
-
-  test("explicit staging enables only the submitted Gmail and Calendar upgrades", () => {
+describe("Google OAuth permissions", () => {
+  test("normal setup exposes the submitted Gmail and Calendar permissions", () => {
     expect(
-      oauthScopeForPermissionSets(manifest("gmail", true), [
+      oauthScopeForPermissionSets(manifest("gmail"), [
         "read",
         "drafts",
         "send",
@@ -75,18 +25,18 @@ describe("Google launch permission boundary", () => {
       "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
     );
     expect(
-      oauthScopeForPermissionSets(manifest("google-calendar", true), [
+      oauthScopeForPermissionSets(manifest("google-calendar"), [
         "read",
         "write",
       ]),
     ).toContain("auth/calendar.events");
     expect(() =>
-      nextOAuthPermissionSetIds(manifest("gmail", true), {}, "organize"),
+      nextOAuthPermissionSetIds(manifest("gmail"), {}, "organize"),
     ).toThrow();
     expect(() =>
-      nextOAuthPermissionSetIds(manifest("google-drive", true), {}, "write"),
+      nextOAuthPermissionSetIds(manifest("google-drive"), {}, "write"),
     ).toThrow();
-    expect(manifest("google-drive", true).tools?.allow).toEqual([
+    expect(manifest("google-drive").tools?.allow).toEqual([
       "download_file",
       "export_file",
       "get_file",
@@ -95,17 +45,17 @@ describe("Google launch permission boundary", () => {
   });
 
   test("requests all supported Google permissions initially without changing existing grants", () => {
-    const gmail = manifest("gmail", true);
+    const gmail = manifest("gmail");
     expect(nextOAuthPermissionSetIds(gmail, undefined)).toEqual([
       "read",
       "drafts",
       "send",
     ]);
     expect(
-      nextOAuthPermissionSetIds(manifest("google-calendar", true), undefined),
+      nextOAuthPermissionSetIds(manifest("google-calendar"), undefined),
     ).toEqual(["read", "write"]);
     expect(
-      nextOAuthPermissionSetIds(manifest("google-drive", true), undefined),
+      nextOAuthPermissionSetIds(manifest("google-drive"), undefined),
     ).toEqual(["read"]);
     expect(
       grantedOAuthPermissionSetIds({ grantedPermissionSets: ["read"] }, gmail),

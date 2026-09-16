@@ -1512,6 +1512,10 @@ function TaskDetailPage() {
                     update({ modelSelection: selection })
                   }
                   value={task.value.modelOverride}
+                  googleDataProtected={task.value.googleDataProtected}
+                  inheritedValue={
+                    execution.value ?? models.value?.defaultSelection
+                  }
                 />
                 {execution.loading ? <LoadingLine /> : null}
                 {execution.error ? (
@@ -3739,6 +3743,18 @@ function ConnectionDetailContent({
             ) : null}
           </dd>
         </div>
+        {["gmail", "google-calendar", "google-drive"].includes(
+          connection.manifestId ?? connection.id,
+        ) ? (
+          <div>
+            <dt>AI data protection</dt>
+            <dd>
+              {connection.googleDataProtection?.enforced
+                ? "OpenRouter · Zero Data Retention enforced"
+                : "ZDR protection not enabled"}
+            </dd>
+          </div>
+        ) : null}
       </dl>
 
       {/* Connection configuration block (Option 1) */}
@@ -3811,27 +3827,6 @@ function ConnectionDetailContent({
           </div>
         </div>
       )}
-
-      {["gmail", "google-calendar", "google-drive"].includes(
-        connection.manifestId ?? connection.id,
-      ) ? (
-        <div className="connection-permissions">
-          <h2>How Google data is used</h2>
-          <p>
-            When a chat or recipe uses this account, relevant emails, events, or
-            files are sent to the AI provider you select. Reports and activity
-            history are stored on your Mac. Reusing them with another model or
-            tool can share that content with another service.
-          </p>
-          <p>
-            Use Google data only with provider accounts and endpoints that do
-            not train general-purpose AI models on your inputs or outputs.
-            Springroll does not currently verify your provider plan or training
-            settings. Local token storage does not keep model processing on your
-            Mac.
-          </p>
-        </div>
-      ) : null}
 
       {addAccountAction ? (
         <div className="connection-accounts">

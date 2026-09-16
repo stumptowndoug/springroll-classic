@@ -18,13 +18,10 @@ checkout, and opens `desktop/dist/dev/Springroll Prototype.app`. Wait for
 ongoing work to finish before updating. This is an explicit rebuild/restart,
 not automatic hot reload. It uses the same prototype workspace and Keychain.
 
-For the local Google OAuth verification demo, run
-`bun run dev:mac:google-verification`. This rebuilds and launches the prototype
-with Gmail sending/drafts and Calendar edits included in initial consent. Existing
-read-only accounts need to **Reconnect** before those tools become active. The launcher passes the configured OAuth registration to the app through
-LaunchServices. The verification build keeps this mode when reopened from Finder; its local
-bundle contains a development-only verification marker. Normal `bun run dev:mac` updates preserve this mode. Use `bun run dev:mac --google-readonly` to
-explicitly return to the read-only Google launch. This does not change release builds.
+Normal builds expose Gmail sending/drafts and Calendar event permissions. Existing
+read-only accounts need to **Reconnect** and grant those permissions before their
+write tools become active. `bun run dev:mac:google-verification` remains an alias
+for the normal development launcher; there is no separate write-scope mode.
 
 The launcher keeps one previous development build in `desktop/dist/dev-previous`.
 Build failures leave the running app and last good build intact. If an update
@@ -162,3 +159,14 @@ inspect the Finder layout before uploading the DMG. Keep the original ZIP hash
 unchanged when adding a DMG to an existing release.
 
 Bundle measurements and optional-runtime plans: [Mac bundle size](../docs/mac-bundle-size.md).
+
+### Installed subscription tools
+
+Springroll reuses installed Codex and Claude CLIs when they expose the integration
+commands the adapters use. There is no numeric version floor for installed tools;
+the managed download version is not a compatibility minimum. Older and newer
+versions are not rejected simply for differing from the managed download.
+Discovery checks version/help output without downloading or making model calls.
+The checks establish CLI entry-point support; protocol errors during actual use
+still surface normally. Missing/unsupported installations can use an explicitly
+downloaded, verified managed copy.

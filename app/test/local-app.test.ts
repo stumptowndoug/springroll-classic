@@ -286,7 +286,6 @@ function createHarness(
     | "codexSubscription"
     | "standardModels"
     | "subscriptionRuntimes"
-    | "googleOAuthWriteStaging"
   > = {},
 ) {
   const database = openLocalDatabase({ filename: ":memory:" });
@@ -296,7 +295,6 @@ function createHarness(
     fetch: async () => Response.json({ data: { label: "test-key" } }),
   });
   const application = new LocalApplication(database.db, {
-    googleOAuthWriteStaging: true,
     credentials,
     models,
     modelCatalog: {
@@ -2370,200 +2368,165 @@ describe("local product application", () => {
     ).toBe("personal@example.com");
   });
 
-  test.each([false, true])(
-    "gates connected Gmail send upgrades behind staging=%s",
-    async (writeStaging) => {
-      let tokenCount = 0;
-      const request: FetchApi = async (input) => {
-        const url = new URL(String(input));
-        if (url.origin === "https://oauth2.google.test") {
-          tokenCount += 1;
-          return Response.json({
-            access_token: `gmail-access-${tokenCount}`,
-            refresh_token: `gmail-refresh-${tokenCount}`,
-            expires_in: 3600,
-            token_type: "Bearer",
-          });
+  test("normal Gmail setup includes send and draft permissions with tool approval controls", async () => {
+    let tokenCount = 0;
+    const request: FetchApi = async (input) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://oauth2.google.test") {
+        tokenCount += 1;
+        return Response.json({
+          access_token: `gmail-access-${tokenCount}`,
+          refresh_token: `gmail-refresh-${tokenCount}`,
+          expires_in: 3600,
+          token_type: "Bearer",
+        });
+      }
+      if (url.origin === "https://gmail.googleapis.com") {
+        if (url.pathname.endsWith("/profile")) {
+          return Response.json({ emailAddress: "work@example.com" });
         }
-        if (url.origin === "https://gmail.googleapis.com") {
-          if (url.pathname.endsWith("/profile")) {
-            return Response.json({ emailAddress: "work@example.com" });
-          }
-          if (url.pathname.endsWith("/labels")) {
-            return Response.json({ labels: [{ id: "INBOX", name: "INBOX" }] });
-          }
+        if (url.pathname.endsWith("/labels")) {
+          return Response.json({ labels: [{ id: "INBOX", name: "INBOX" }] });
         }
-        throw new Error(`Unexpected Gmail request: ${url}`);
-      };
-      const { application } = createHarness(
-        resolveModelExecution,
-        agent,
-        () => now,
-        request,
-        undefined,
-        undefined,
-        undefined,
-        true,
-        {
-          gmail: {
-            clientId: "springroll-google-client",
-            clientSecret: "springroll-google-secret",
-            authorization: {
-              authorizationEndpoint:
-                "https://accounts.google.test/o/oauth2/v2/auth",
-              tokenEndpoint: "https://oauth2.google.test/token",
-              authorizationParameters: {
-                access_type: "offline",
-                prompt: "select_account consent",
-              },
-              accountIdentity: {
-                endpoint:
-                  "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-                field: "emailAddress",
-              },
+      }
+      throw new Error(`Unexpected Gmail request: ${url}`);
+    };
+    const { application } = createHarness(
+      resolveModelExecution,
+      agent,
+      () => now,
+      request,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      {
+        gmail: {
+          clientId: "springroll-google-client",
+          clientSecret: "springroll-google-secret",
+          authorization: {
+            authorizationEndpoint:
+              "https://accounts.google.test/o/oauth2/v2/auth",
+            tokenEndpoint: "https://oauth2.google.test/token",
+            authorizationParameters: {
+              access_type: "offline",
+              prompt: "select_account consent",
+            },
+            accountIdentity: {
+              endpoint:
+                "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+              field: "emailAddress",
             },
           },
         },
-        undefined,
-        { googleOAuthWriteStaging: writeStaging },
-      );
-      const http = createHttpApp(application);
-      const started = await http.request("/api/connectors/gmail/oauth", {
+      },
+      undefined,
+    );
+    const http = createHttpApp(application);
+    const started = await http.request("/api/connectors/gmail/oauth", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    const startBody = (await started.json()) as {
+      readonly authorizationUrl: string;
+      readonly connectionId: string;
+    };
+    const firstState = new URL(startBody.authorizationUrl).searchParams.get(
+      "state",
+    );
+    await http.request(
+      `/api/connectors/gmail/oauth/callback?code=google-code-1&state=${encodeURIComponent(firstState ?? "")}`,
+    );
+
+    const connected = (await application.listConnections()).find(
+      (connection) => connection.id === startBody.connectionId,
+    );
+    await expect(
+      application.connectionToolNeedsApproval(
+        startBody.connectionId,
+        "create_draft",
+        {},
+      ),
+    ).rejects.toThrow(
+      "Missing required inputs for create_draft: to, subject, body",
+    );
+    await expect(
+      application.connectionToolNeedsApproval(
+        startBody.connectionId,
+        "create_draft",
+        { to: "self@example.com", subject: "Test", body: "Test draft" },
+      ),
+    ).resolves.toBe(false);
+    await application.updateConnectionToolPolicy(startBody.connectionId, {
+      toolName: "create_draft",
+      mode: "check_first",
+    });
+    await expect(
+      application.connectionToolNeedsApproval(
+        startBody.connectionId,
+        "create_draft",
+        { to: "self@example.com", subject: "Test", body: "Test draft" },
+      ),
+    ).resolves.toBe(true);
+    expect(connected).toMatchObject({
+      toolCount: 7,
+      permissionSets: [
+        { id: "read", granted: true },
+        { id: "drafts", granted: true },
+        { id: "send", granted: true },
+      ],
+    });
+    expect(connected?.tools?.map((tool) => tool.name)).toContain(
+      "send_message",
+    );
+
+    const upgrade = await http.request(
+      `/api/connectors/${startBody.connectionId}/oauth`,
+      {
         method: "POST",
         headers: { "content-type": "application/json" },
-      });
-      const startBody = (await started.json()) as {
-        readonly authorizationUrl: string;
-        readonly connectionId: string;
-      };
-      const firstState = new URL(startBody.authorizationUrl).searchParams.get(
-        "state",
-      );
-      await http.request(
-        `/api/connectors/gmail/oauth/callback?code=google-code-1&state=${encodeURIComponent(firstState ?? "")}`,
-      );
+        body: JSON.stringify({ permissionSet: "send" }),
+      },
+    );
+    expect(upgrade.status).toBe(200);
+    const upgradeBody = (await upgrade.json()) as {
+      readonly authorizationUrl: string;
+    };
+    const upgradeUrl = new URL(upgradeBody.authorizationUrl);
+    expect(upgradeUrl.searchParams.get("scope")).toBe(
+      "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
+    );
+    const upgradeState = upgradeUrl.searchParams.get("state");
+    await http.request(
+      `/api/connectors/gmail/oauth/callback?code=google-code-2&state=${encodeURIComponent(upgradeState ?? "")}`,
+    );
 
-      const connected = (await application.listConnections()).find(
-        (connection) => connection.id === startBody.connectionId,
-      );
-      if (!writeStaging) {
-        expect(connected?.permissionSets).toEqual([
-          expect.objectContaining({ id: "read", granted: true }),
-        ]);
-        const denied = await http.request(
-          `/api/connectors/${startBody.connectionId}/oauth`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ permissionSet: "send" }),
-          },
-        );
-        expect(denied.status).toBe(400);
-        expect(tokenCount).toBe(1);
-        expect(connected?.tools?.map((tool) => tool.name)).not.toContain(
-          "send_message",
-        );
-        expect(
-          (await application.searchConnectionTools("send email")).matches.some(
-            (tool) => tool.toolName === "send_message",
-          ),
-        ).toBe(false);
-        await expect(
-          application.connectionToolNeedsApproval(
-            startBody.connectionId,
-            "create_draft",
-            {},
-          ),
-        ).rejects.toThrow("unavailable");
-        return;
-      }
-      await expect(
-        application.connectionToolNeedsApproval(
-          startBody.connectionId,
-          "create_draft",
-          {},
-        ),
-      ).rejects.toThrow(
-        "Missing required inputs for create_draft: to, subject, body",
-      );
-      await expect(
-        application.connectionToolNeedsApproval(
-          startBody.connectionId,
-          "create_draft",
-          { to: "self@example.com", subject: "Test", body: "Test draft" },
-        ),
-      ).resolves.toBe(false);
-      await application.updateConnectionToolPolicy(startBody.connectionId, {
-        toolName: "create_draft",
-        mode: "check_first",
-      });
-      await expect(
-        application.connectionToolNeedsApproval(
-          startBody.connectionId,
-          "create_draft",
-          { to: "self@example.com", subject: "Test", body: "Test draft" },
-        ),
-      ).resolves.toBe(true);
-      expect(connected).toMatchObject({
-        toolCount: 7,
-        permissionSets: [
-          { id: "read", granted: true },
-          { id: "drafts", granted: true },
-          { id: "send", granted: true },
-        ],
-      });
-      expect(connected?.tools?.map((tool) => tool.name)).toContain(
-        "send_message",
-      );
-
-      const upgrade = await http.request(
-        `/api/connectors/${startBody.connectionId}/oauth`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ permissionSet: "send" }),
-        },
-      );
-      expect(upgrade.status).toBe(200);
-      const upgradeBody = (await upgrade.json()) as {
-        readonly authorizationUrl: string;
-      };
-      const upgradeUrl = new URL(upgradeBody.authorizationUrl);
-      expect(upgradeUrl.searchParams.get("scope")).toBe(
-        "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send",
-      );
-      const upgradeState = upgradeUrl.searchParams.get("state");
-      await http.request(
-        `/api/connectors/gmail/oauth/callback?code=google-code-2&state=${encodeURIComponent(upgradeState ?? "")}`,
-      );
-
-      const sending = (await application.listConnections()).find(
-        (connection) => connection.id === startBody.connectionId,
-      );
-      expect(sending?.permissionSets).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: "read", granted: true }),
-          expect.objectContaining({ id: "send", granted: true }),
-          expect.objectContaining({ id: "drafts", granted: true }),
-        ]),
-      );
-      expect(sending?.tools?.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["search_threads", "send_message"]),
-      );
-      const detail = await application.getConnectionDetail(
-        startBody.connectionId,
-      );
-      expect(detail).toMatchObject({
-        tools: expect.arrayContaining([
-          expect.objectContaining({
-            name: "send_message",
-            effect: "write",
-            mode: "check_first",
-          }),
-        ]),
-      });
-    },
-  );
+    const sending = (await application.listConnections()).find(
+      (connection) => connection.id === startBody.connectionId,
+    );
+    expect(sending?.permissionSets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "read", granted: true }),
+        expect.objectContaining({ id: "send", granted: true }),
+        expect.objectContaining({ id: "drafts", granted: true }),
+      ]),
+    );
+    expect(sending?.tools?.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(["search_threads", "send_message"]),
+    );
+    const detail = await application.getConnectionDetail(
+      startBody.connectionId,
+    );
+    expect(detail).toMatchObject({
+      tools: expect.arrayContaining([
+        expect.objectContaining({
+          name: "send_message",
+          effect: "write",
+          mode: "check_first",
+        }),
+      ]),
+    });
+  });
 
   test("connects Google Calendar through native Calendar API with event management at initial consent", async () => {
     let tokenCount = 0;

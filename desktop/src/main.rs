@@ -262,10 +262,6 @@ fn launch(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(&data)
         .env("SPRINGROLL_DATA_DIR", &data)
         .env("SPRINGROLL_DESKTOP", "1")
-        .env("SPRINGROLL_GOOGLE_OAUTH_WRITE_STAGING", if
-            std::env::var("SPRINGROLL_GOOGLE_OAUTH_WRITE_STAGING").as_deref() == Ok("1")
-            || (cfg!(debug_assertions) && resources.join("google-oauth-verification").exists())
-            { "1" } else { "0" })
         .env("SPRINGROLL_RESOURCES_DIR", &resources)
         .env("SPRINGROLL_KEYCHAIN_SERVICE", service)
         .env_remove("SPRINGROLL_DB_PATH")

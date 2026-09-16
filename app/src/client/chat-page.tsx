@@ -916,6 +916,8 @@ export function ChatConversation({
                     }}
                     openUp
                     value={detail.session.modelOverride}
+                    googleDataProtected={detail.googleDataProtected}
+                    inheritedValue={availableModels?.defaultSelection}
                   />
                   <input
                     accept="image/png,image/jpeg,image/webp"

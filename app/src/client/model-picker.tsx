@@ -6,6 +6,8 @@ import type {
   ModelSettingsDto,
 } from "../shared.ts";
 
+import { SettingsPicker } from "./settings-picker.tsx";
+
 export function ModelPicker({
   models,
   value,
@@ -15,7 +17,11 @@ export function ModelPicker({
   align = "start",
   compact = false,
   openUp = false,
+  googleDataProtected = false,
+  inheritedValue,
 }: {
+  readonly googleDataProtected?: boolean | undefined;
+  readonly inheritedValue?: ModelSelectionDto | undefined;
   readonly models: readonly ModelOptionDto[];
   readonly value: ModelSelectionDto | undefined;
   readonly inheritLabel: string;
@@ -30,7 +36,20 @@ export function ModelPicker({
   const [providerFilter, setProviderFilter] = useState<ModelProviderId | "all">(
     "all",
   );
+  const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [active, setActive] = useState(0);
+  const unavailable = (model: ModelOptionDto | undefined) =>
+    googleDataProtected &&
+    (!model ||
+      model.googleDataCompatibility === "unavailable" ||
+      !model.googleDataCompatibility);
+  const inheritedModel = models.find(
+    (model) =>
+      model.providerId === inheritedValue?.providerId &&
+      model.modelId === inheritedValue?.modelId,
+  );
+  const inheritUnavailable = unavailable(inheritedModel);
+
   const searchRef = useRef<HTMLInputElement>(null);
 
   const selected = value
@@ -51,10 +70,15 @@ export function ModelPicker({
 
   const normalizedQuery = query.trim().toLowerCase();
   const providers = modelProviders(models);
+  const filteredModels = models.filter(
+    (model) =>
+      availabilityFilter === "all" ||
+      model.googleDataCompatibility === availabilityFilter,
+  );
   const providerModels =
     providerFilter === "all"
-      ? models
-      : models.filter((model) => model.providerId === providerFilter);
+      ? filteredModels
+      : filteredModels.filter((model) => model.providerId === providerFilter);
   const visibleModels = normalizedQuery
     ? providerModels.filter(
         (model) =>
@@ -66,7 +90,10 @@ export function ModelPicker({
       )
     : providerModels;
   const grouped = groupModels(visibleModels);
-  const showInherit = normalizedQuery === "" && providerFilter === "all";
+  const showInherit =
+    normalizedQuery === "" &&
+    providerFilter === "all" &&
+    availabilityFilter === "all";
   const optionCount = visibleModels.length + (showInherit ? 1 : 0);
   const flatIndexByModel = new Map(
     visibleModels.map((model, index) => [
@@ -82,6 +109,7 @@ export function ModelPicker({
   }, [open]);
 
   const choose = (option: ModelOptionDto | null) => {
+    if (option ? unavailable(option) : inheritUnavailable) return;
     setOpen(false);
     onChange(
       option
@@ -98,7 +126,8 @@ export function ModelPicker({
       choose(null);
       return;
     }
-    choose(visibleModels[active - (showInherit ? 1 : 0)] ?? null);
+    const option = visibleModels[active - (showInherit ? 1 : 0)];
+    if (option) choose(option);
   };
 
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -137,6 +166,7 @@ export function ModelPicker({
         onClick={() => {
           setQuery("");
           setProviderFilter("all");
+          setAvailabilityFilter("all");
           setActive(0);
           setOpen((wasOpen) => !wasOpen);
         }}
@@ -147,6 +177,19 @@ export function ModelPicker({
           {open ? "▴" : "▾"}
         </span>
       </button>
+      {googleDataProtected ? (
+        <small
+          className={
+            unavailable(value ? selected : inheritedModel)
+              ? "execution-error"
+              : undefined
+          }
+        >
+          {unavailable(value ? selected : inheritedModel)
+            ? "Uses Google data · Choose a compatible model."
+            : "Uses Google data · Compatible providers only."}
+        </small>
+      ) : null}
       {!compact && models.length === 0 ? (
         <small>Connect an AI provider to choose a model.</small>
       ) : null}
@@ -159,32 +202,62 @@ export function ModelPicker({
             type="button"
           />
           <div
-            className={`combo-panel${align === "end" ? " align-end" : ""}${
+            className={`combo-panel model-catalog-panel${align === "end" ? " align-end" : ""}${
               openUp ? " open-up" : ""
             }`}
           >
             {providers.length > 1 ? (
-              <label className="combo-provider-filter">
+              <div className="combo-provider-filter">
                 <span>Provider</span>
-                <select
-                  aria-label="Filter models by provider"
-                  onChange={(event) => {
-                    setProviderFilter(
-                      event.target.value as ModelProviderId | "all",
-                    );
+                <SettingsPicker
+                  className="model-filter-picker"
+                  label="Filter models by provider"
+                  disabled={false}
+                  value={providerFilter}
+                  options={[
+                    { value: "all", label: "All providers" },
+                    ...providers.map((providerId) => ({
+                      value: providerId,
+                      label: providerName(providerId),
+                    })),
+                  ]}
+                  onChange={(value) => {
+                    setProviderFilter(value as ModelProviderId | "all");
                     setActive(0);
                   }}
-                  value={providerFilter}
-                >
-                  <option value="all">All providers</option>
-                  {providers.map((providerId) => (
-                    <option key={providerId} value={providerId}>
-                      {providerName(providerId)} ·{" "}
-                      {providerTypeLabel(providerId)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                />
+              </div>
+            ) : null}
+            {googleDataProtected ? (
+              <div className="combo-provider-filter">
+                <span>
+                  {providerFilter === "openrouter"
+                    ? "ZDR routing"
+                    : "Google data"}
+                </span>
+                <SettingsPicker
+                  className="model-filter-picker"
+                  label="Filter models by Google data compatibility"
+                  disabled={false}
+                  value={availabilityFilter}
+                  options={[
+                    { value: "all", label: "All models" },
+                    {
+                      value: "available",
+                      label:
+                        providerFilter === "openrouter"
+                          ? "ZDR available"
+                          : "Compatible models",
+                    },
+                    { value: "unavailable", label: "Unavailable" },
+                    { value: "unknown", label: "Availability unknown" },
+                  ]}
+                  onChange={(value) => {
+                    setAvailabilityFilter(value);
+                    setActive(0);
+                  }}
+                />
+              </div>
             ) : null}
             <div className="combo-search">
               <span aria-hidden="true">⌕</span>
@@ -204,6 +277,7 @@ export function ModelPicker({
               {showInherit ? (
                 <button
                   aria-selected={!value}
+                  aria-disabled={inheritUnavailable}
                   className={`${optionClass(0, !value)} combo-default`}
                   onClick={() => choose(null)}
                   onMouseEnter={() => setActive(0)}
@@ -215,6 +289,11 @@ export function ModelPicker({
                     ✓
                   </span>
                   <span className="combo-name">{inheritLabel}</span>
+                  {inheritUnavailable ? (
+                    <span className="combo-facts">
+                      Choose a compatible model explicitly
+                    </span>
+                  ) : null}
                 </button>
               ) : null}
               {visibleModels.length === 0 ? (
@@ -235,6 +314,12 @@ export function ModelPicker({
                     return (
                       <button
                         aria-selected={isSelected}
+                        aria-disabled={unavailable(model)}
+                        title={
+                          googleDataProtected
+                            ? model.googleDataReason
+                            : undefined
+                        }
                         className={optionClass(index, isSelected)}
                         key={modelValue(model)}
                         onClick={() => choose(model)}
@@ -247,6 +332,17 @@ export function ModelPicker({
                           ✓
                         </span>
                         <span className="combo-name">{model.name}</span>
+                        {googleDataProtected ? (
+                          <span className="combo-facts">
+                            {model.googleDataCompatibility === "available"
+                              ? "ZDR available"
+                              : model.googleDataCompatibility === "unavailable"
+                                ? model.providerId === "openrouter"
+                                  ? "No ZDR endpoint"
+                                  : "Google data unavailable"
+                                : "ZDR availability unknown"}
+                          </span>
+                        ) : null}
                         {facts ? (
                           <span className="combo-facts">{facts}</span>
                         ) : null}

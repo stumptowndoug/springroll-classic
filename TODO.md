@@ -85,6 +85,16 @@ Earlier backlog, partial work, and completed history are preserved in [the Septe
 
 
 
+
+
+
+
+
+
+
+
+
+
 - [ ] Preserve conversation context after large tool-result turns
   - Fixed context selection to omit oversized completed tool details before dropping request/answer text; pending approvals and full durable history are preserved. Subscription transcript now includes dynamic-tool results when they fit.
   - Regression failed before/passed after; replay of the real saved Neon chat retains request and table summary (2,137 characters on the cadence follow-up). Full suite: 699 pass; updated focused suite including approval retention: 55 pass; typecheck/lint/diff checks pass.
@@ -113,8 +123,9 @@ Earlier backlog, partial work, and completed history are preserved in [the Septe
   - [x] Submit the owner's replacement demo: owner uploaded the 15m21s video as Unlisted; replaced the old YouTube link and confirmed the pending-request update. Google Console displayed Data access changes saved. Scope coverage remains subject to review; private video URL kept outside Git.
   - [x] Audit supported provider code and published terms; document routing/training gaps and prepare disclosure draft.
   - [ ] Confirm actual provider plans and no-training settings; owner was asked which demo accounts/tiers to use. Do not infer these from API keys.
-  - Owner decision: preserve user-selected models, endpoints, and accounts; do not implement provider allowlists or training-based routing gates for verification. Describe current behavior honestly and address reviewer objections if raised.
+  - September 16: owner authorized implementing enforced OpenRouter ZDR after Google’s September 15 conditional acceptance; this supersedes the earlier decision to defer routing restrictions.
   - [x] Prepare a scope-by-scope demo outline for owner review; owner subsequently recorded and submitted a replacement. See [demo outline](docs/google-verification-demo-outline.md).
+  - [ ] Complete ZDR account/tier and endpoint evidence, explicitly resolve user-account BYOK exceptions, and run the synthetic-data acceptance/demo checklist in [ZDR implementation](docs/google-zdr-implementation.md).
   - [ ] Publish substantiated disclosures/Limited Use statement, resolve applicable assessment obligations, and reply to Google's review email with verified evidence.
   - Last confirmed status: data access unverified; expanded scope configuration saved to the pending request. Replacement demo saved to the pending request. No compliance attestation, reviewer email, or production deployment completed in this update.
   - Evidence and details: [Google verification submission](docs/google-verification-submission.md).
@@ -159,6 +170,62 @@ Earlier backlog, partial work, and completed history are preserved in [the Septe
   - Policy and acceptance handoff: [docs/missed-run-policy.md](docs/missed-run-policy.md). Keep this card open until device acceptance; do not silently treat simulated downtime as Mac sleep verification.
 
 ## ✅ Done
+
+- [x] Remove unsupported version floors from installed subscription runtime discovery
+  - Corrected the prior minimum-version assumption: pinned package versions describe managed downloads, not a tested compatibility floor. Installed Claude/Codex tools now use command capability checks only.
+  - Claude checks the isolation/session/permission flags actually used by the adapter; Codex checks its app-server stdio entry point. This does not claim all historical protocol versions are compatible.
+  - 19 runtime/adapter tests pass, including older/newer version fixtures and missing-command rejection; local Codex/Claude detection passes without downloads. Typecheck/lint and rebuilt prototype pass.
+
+
+- [x] Reuse newer installed Claude and Codex runtimes without unnecessary downloads
+  - Replaced exact major/minor matching with a minimum version check plus installed CLI command capability checks; newer minor/major releases no longer require a pinned copy solely due to version number.
+  - Reuse installed binaries without downloading; preserve verified managed fallback for missing/unsupported installations. Setup explains detected old/incompatible installations.
+  - 17 runtime/adapter tests pass, typecheck/lint pass; real local detection reports Codex 0.154.0 and Claude 2.1.273 ready with downloads disabled. Rebuilt/reopened prototype.
+
+
+- [x] Replace native model filter dropdowns with Springroll pickers
+  - Reused SettingsPicker for provider and Google-data availability filters, with compact in-app menus, selected checks, keyboard support, and matching theme styling.
+  - Typecheck/build pass; browser interaction verified menu opening, provider selection and filtering without closing the outer picker. Rebuilt/reopened local prototype.
+
+
+- [x] Limit Google-data model feedback to affected recipes and chats
+  - Removed Google/ZDR filters, labels, and tooltips from general model pickers, including Models & Limits. Protected recipe/chat pickers retain feedback; runtime Google access enforcement remains unchanged.
+  - 16 focused tests, typecheck and lint pass; rebuilt/reopened the local prototype.
+
+
+- [x] Remove Google write-scope staging gate from normal setup
+  - Removed launch-time tool/scope filtering, staging option/environment wiring, and desktop verification markers; normal Gmail setup exposes send/drafts and Calendar event permissions.
+  - Existing grants and tool approvals remain enforced. Live rebuilt prototype shows send/drafts as available permission upgrades, currently ungranted for its Gmail connection; reconnect is needed.
+  - 77 OAuth/application/registry tests pass; typecheck/lint and desktop build pass. Rebuilt and reopened local Springroll Prototype; installed release unchanged.
+
+
+- [x] Remove blanket external-tool restrictions from Google-data workflows
+  - Removed mixed-integration recipe rejection, non-Google connector rejection, and registry bans on web/research tools; normal permissions/approvals remain.
+  - Kept OAuth scope checks and AI-route controls. Image API lacks documented request-level ZDR; its protected-data error now identifies that limitation.
+  - Regression coverage verifies external connector and web/research execution preserve the Google-data marker. 83 tests pass; typecheck, changed-file lint and build pass.
+
+
+- [x] Show Google-data model compatibility in recipe/chat pickers and explain unavailable OpenRouter ZDR routes
+  - Added live OpenRouter ZDR inventory metadata, availability dropdown, disabled incompatible selections, inherited-default warning, and actionable protected-route errors.
+  - Full check: 761 tests pass, typecheck/lint pass (existing CSS warnings); production build and isolated browser interaction checks passed.
+  - Direct-provider Google-data eligibility remains pending account controls; UI accurately reflects the current OpenRouter-only runtime restriction.
+
+
+- [x] Replace OpenRouter endpoint whitelist with enforced ZDR routing and verify direct-provider policies
+  - Removed fixed models/hosts and inventory preflight; OpenRouter selects ZDR-eligible endpoints and fallbacks. Final request enforces `provider.zdr: true`; UI shows only “OpenRouter · Zero Data Retention enforced.”
+  - Direct APIs are not universally ZDR by default; documented no-training terms separately in [provider review](docs/google-provider-data-policy.md). Direct Google-data eligibility remains pending account evidence; no blanket ZDR claim.
+  - Typecheck, changed-file lint, build, diff check and 18 routing/provider/isolation tests passed.
+
+- [x] Condense Google ZDR disclosure into a compact connection detail
+  - Replaced the explanatory block with an AI data protection item matching Where it runs: “OpenRouter · ZDR providers only” and one line of available hosting providers. Enforcement unchanged; typecheck/build/changed-file lint and visual browser verification passed.
+
+- [x] Enforce OpenRouter ZDR for Google data and show eligible providers on Google connection screens
+  - Branch: `feat/google-openrouter-zdr`. Added fixed model/hosting routes, live ZDR availability, final-request enforcement, persistent chat/recipe protection, secondary-title isolation, external-tool/MCP restrictions, and content-free attempted-route audit records.
+  - Google screens show ZDR requirements, model/hosting-provider availability and connection guidance above technical configuration. Visually verified in an isolated browser preview; installed desktop app unchanged.
+  - Validation: full check passed (758 tests), latest focused regressions passed (74 tests), typecheck/build/lint/diff checks passed. Real Google/API account runs were not performed.
+  - Migration conservatively protects all older chats/recipes because they lack provenance. Shared local inventories also require protection; review these compatibility restrictions before release.
+  - Remaining account evidence, BYOK exception handling, synthetic-data acceptance, privacy publication and demo submission stay in the Google verification card. See [implementation and evidence checklist](docs/google-zdr-implementation.md).
+
 
 - [x] Publish v0.1.4 with connector availability and chat approval fixes
   - PR #20 merged as dc7999f; PR and main CI/CodeQL passed, with 747 local tests and four native tests passing.

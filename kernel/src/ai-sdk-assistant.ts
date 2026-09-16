@@ -74,6 +74,7 @@ export interface AssistantMessageMetadata extends JsonObject {
 export type AssistantUIMessage = UIMessage<AssistantMessageMetadata>;
 
 interface AssistantRuntimeBase {
+  readonly googleDataProtected?: boolean;
   readonly provider: string;
   readonly modelId: string;
   readonly billing?: "metered" | "subscription" | "unknown";
@@ -110,7 +111,11 @@ export interface AiSdkAssistantOptions {
   }>;
   readonly loadRuntime: (
     selection?: TaskModelSelection,
-    context?: { readonly turnId: string },
+    context?: {
+      readonly turnId?: string;
+      readonly sessionId?: string;
+      readonly purpose?: "title";
+    },
   ) => Promise<AnyAssistantRuntime>;
   readonly loadDistillerRuntime?:
     | (() => Promise<AssistantRuntime | undefined>)
@@ -173,7 +178,11 @@ export class AiSdkAssistant {
   readonly #artifactBlobs: AiSdkAssistantOptions["artifactBlobs"];
   readonly #loadRuntime: (
     selection?: TaskModelSelection,
-    context?: { readonly turnId: string },
+    context?: {
+      readonly turnId?: string;
+      readonly sessionId?: string;
+      readonly purpose?: "title";
+    },
   ) => Promise<AnyAssistantRuntime>;
   readonly #loadDistillerRuntime?:
     | (() => Promise<AssistantRuntime | undefined>)
@@ -688,7 +697,7 @@ export class AiSdkAssistant {
       const session = this.#chats.getSession(sessionId);
       const runtime = await this.#loadRuntime(
         sessionModelOverride(session ?? undefined),
-        { turnId: turn.id },
+        { turnId: turn.id, sessionId },
       );
       const history = this.#chats.listMessages(sessionId).map(toUiMessage);
       await validateUIMessages<AssistantUIMessage>({
@@ -1715,11 +1724,13 @@ export class AiSdkAssistant {
         return;
       }
 
-      const runtime =
-        (this.#loadDistillerRuntime
-          ? await this.#loadDistillerRuntime()
-          : undefined) ??
-        (await this.#loadRuntime(sessionModelOverride(session ?? undefined)));
+      const primaryRuntime = await this.#loadRuntime(
+        sessionModelOverride(session ?? undefined),
+        { sessionId, purpose: "title" },
+      );
+      const runtime = primaryRuntime.googleDataProtected
+        ? primaryRuntime
+        : ((await this.#loadDistillerRuntime?.()) ?? primaryRuntime);
       if (!runtime || isSubscriptionAssistantRuntime(runtime)) return;
 
       const answerText = responseParts

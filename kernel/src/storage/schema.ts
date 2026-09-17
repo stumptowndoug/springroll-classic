@@ -74,6 +74,9 @@ export const modelProviderConnections = sqliteTable(
     name: text("name").notNull(),
     catalogProviderId: text("catalog_provider_id").notNull(),
     credentialRef: text("credential_ref").notNull(),
+    googleDataConfirmedAt: integer("google_data_confirmed_at", {
+      mode: "timestamp_ms",
+    }),
     availableIn: text("available_in", { mode: "json" })
       .$type<ExecutionLocation[]>()
       .notNull(),
@@ -698,3 +701,15 @@ export type AssistantWorkflowRow = typeof assistantWorkflows.$inferSelect;
 export type ModelCallRow = typeof modelCalls.$inferSelect;
 export type ExecutionSettingsRow = typeof executionSettings.$inferSelect;
 export type NewExecutionSettingsRow = typeof executionSettings.$inferInsert;
+
+export const googleDataProtection = sqliteTable("google_data_protection", {
+  id: text("id").primaryKey(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const googleDataRouteAudit = sqliteTable("google_data_route_audit", {
+  id: text("id").primaryKey(),
+  modelId: text("model_id").notNull(),
+  endpoint: text("endpoint").notNull(),
+  requestedAt: integer("requested_at", { mode: "timestamp_ms" }).notNull(),
+});

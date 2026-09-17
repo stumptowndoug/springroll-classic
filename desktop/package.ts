@@ -17,16 +17,6 @@ if (process.platform !== "darwin")
 const root = fileURLToPath(new URL("../", import.meta.url));
 const desktop = join(root, "desktop");
 const release = process.argv.includes("--release");
-export const googleVerification =
-  !release &&
-  !process.argv.includes("--google-readonly") &&
-  (process.argv.includes("--google-verification") ||
-    (await Bun.file(
-      join(
-        desktop,
-        "dist/dev/Springroll Prototype.app/Contents/Resources/runtime/google-oauth-verification",
-      ),
-    ).exists()));
 const expectedBun = (
   await Bun.file(join(root, "package.json")).json()
 ).packageManager.split("@")[1];
@@ -38,7 +28,7 @@ const productName = release ? "Springroll" : "Springroll Prototype";
 const identifier = release
   ? "com.springroll.desktop"
   : "com.springroll.desktop.prototype";
-const version = "0.1.4";
+const version = "0.1.5";
 const buildNumber = process.env.SPRINGROLL_BUILD_NUMBER || "1";
 if (!/^\d+$/.test(buildNumber)) throw new Error("Build number must be numeric");
 const oauth: Record<string, string> = {};
@@ -154,8 +144,6 @@ await writeFile(
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>`,
 );
-if (googleVerification)
-  await writeFile(join(runtime, "google-oauth-verification"), "1");
 if (release)
   await writeFile(join(runtime, "oauth-clients.json"), JSON.stringify(oauth));
 console.log(

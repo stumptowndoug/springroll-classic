@@ -246,6 +246,20 @@
       "when": 1788665353483,
       "tag": "0034_appearance-settings",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1789570800000,
+      "tag": "0035_google-data-protection",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1789670000000,
+      "tag": "0036_google-provider-eligibility",
+      "breakpoints": true
     }
   ]
 }

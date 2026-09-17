@@ -279,16 +279,10 @@ just rot.
    want to dogfood a catalog MCP provider — no extra Cloud setup.
 
 
-### Google verification staging
+### Google permissions
 
-Gmail send/draft and Calendar event-management scopes are pending review. Normal
-startup exposes only Google read tools and rejects write permission upgrades on
-the server. For a dedicated local verification run, set
-`SPRINGROLL_GOOGLE_OAUTH_WRITE_STAGING=1` before starting the server. This enables
-the submitted optional Gmail/Calendar tools, not Drive writes. The flag is not
-copied into release OAuth configuration. Do not set it for public production
-traffic. Keep the Google project's publishing status In production.
-
-A staging flag does not establish AI data-policy compliance. Read the
-[Google AI data audit](google-ai-data-audit.md) before using Google data with a
-model provider. Review the recording plan with the owner before recording.
+Normal setup exposes the submitted Gmail sending/draft and Calendar event-management
+permissions. Existing read-only accounts must reconnect and consent before using
+those tools. Drive remains read-only. The former write-staging flag and bundle
+marker no longer control available tools. Removing that gate does not represent
+Google verification approval or change AI data-policy controls.

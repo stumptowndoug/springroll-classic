@@ -118,6 +118,7 @@ import {
   type ExecutionSettingsDto,
   type IntegrationProposalOutcomeDto,
   type ModelExecutionDto,
+  type ModelOptionDto,
   type ModelProviderDto,
   type ModelProviderId,
   type ModelSelectionDto,
@@ -152,7 +153,13 @@ import {
   matchConnectorTemplate,
 } from "./connector-templates.ts";
 import { deleteOwnedChats } from "./delete-owned-chats.ts";
-import { googleLaunchManifest } from "./google-launch-permissions.ts";
+import {
+  assertGoogleConnectionAccess,
+  currentGoogleDataAccess,
+  GoogleDataProtection,
+  isGoogleApiManifest,
+  isGoogleConnection,
+} from "./google-data-protection.ts";
 import type {
   DocumentedApiResearchInput,
   IntegrationResearcher,
@@ -218,7 +225,7 @@ export interface LocalApplicationOptions {
   readonly now?: () => Date;
   readonly extraToolSources?: readonly ToolSource[];
   readonly connectorRegistry?: readonly ConnectorManifest[];
-  readonly googleOAuthWriteStaging?: boolean;
+  readonly enforceGoogleDataProtection?: boolean;
   readonly fetch?: FetchApi;
   readonly artifactBlobs?: ArtifactBlobStore;
   readonly artifacts?: SqliteArtifactRepository;
@@ -347,6 +354,9 @@ export interface AssistantConnectionToolSummary {
 }
 
 export interface AssistantConnectionToolDescription {
+  readonly totalMatches?: number;
+  readonly truncated?: boolean;
+  readonly googleDataAccess?: AssistantConnectionToolSearchResult["googleDataAccess"];
   readonly connectionId: string;
   readonly connectionName: string;
   readonly tools: readonly AssistantConnectionToolSummary[];
@@ -361,6 +371,12 @@ export interface AssistantConnectionToolActivation {
 }
 
 export interface AssistantConnectionToolSearchResult {
+  readonly totalMatches?: number;
+  readonly truncated?: boolean;
+  readonly googleDataAccess?: {
+    readonly status: "unavailable";
+    readonly message: string;
+  };
   readonly query: string;
   readonly searchedConnections: number;
   readonly unavailableConnections: number;
@@ -498,6 +514,7 @@ function distillerUsageForRun(
 }
 
 export class LocalApplication {
+  readonly #enforceGoogleDataProtection: boolean;
   readonly #credentials: CredentialStore;
   readonly #models: OpenRouterModelConnection;
   readonly #openAiModels: OpenAiModelConnection;
@@ -555,17 +572,14 @@ export class LocalApplication {
     this.#localMcpResearcher = options.localMcpResearcher;
     this.#openApiResearcher = options.openApiResearcher;
     this.#resolveModelExecution = options.resolveModelExecution;
+    this.#enforceGoogleDataProtection =
+      options.enforceGoogleDataProtection === true;
     this.#now = options.now ?? (() => new Date());
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#connectorRegistry = new Map(
       (options.connectorRegistry ?? connectorRegistryManifests).map(
         (manifest) => {
-          const parsed = parseConnectorManifest(
-            googleLaunchManifest(
-              structuredClone(manifest),
-              options.googleOAuthWriteStaging,
-            ),
-          );
+          const parsed = parseConnectorManifest(structuredClone(manifest));
           return [parsed.id, parsed] as const;
         },
       ),
@@ -622,7 +636,37 @@ export class LocalApplication {
             this.connectorOAuthAccessToken(manifest, connection, signal),
         ),
         ...(options.extraToolSources ?? []),
-      ].map((source) => [source.id, source]),
+      ].map((source) => [
+        source.id,
+        options.enforceGoogleDataProtection
+          ? {
+              ...source,
+              id: source.id,
+              kind: source.kind,
+              ...(source.dispose
+                ? { dispose: source.dispose.bind(source) }
+                : {}),
+              open: async (openOptions: Parameters<ToolSource["open"]>[0]) => {
+                const session = await source.open(openOptions);
+                return {
+                  listTools: () => session.listTools(),
+                  close: () => session.close(),
+                  callTool: (...args: Parameters<typeof session.callTool>) => {
+                    assertGoogleConnectionAccess(
+                      openOptions.connection,
+                      openOptions.connection.manifestId
+                        ? this.connectorManifest(
+                            openOptions.connection.manifestId,
+                          )
+                        : undefined,
+                    );
+                    return session.callTool(...args);
+                  },
+                };
+              },
+            }
+          : source,
+      ]),
     );
     this.#executor = new AgentRunExecutor(db, {
       agent: options.agent,
@@ -655,6 +699,38 @@ export class LocalApplication {
 
   getToolSource(sourceId: string): ToolSource | undefined {
     return this.#sources.get(sourceId);
+  }
+
+  private async googleDiscoveryNotice(usesGoogle: boolean): Promise<{
+    googleDataAccess?: NonNullable<
+      AssistantConnectionToolSearchResult["googleDataAccess"]
+    >;
+  }> {
+    const scope = currentGoogleDataAccess();
+    let googleDataAccess: AssistantConnectionToolSearchResult["googleDataAccess"];
+    if (scope && usesGoogle) {
+      if (!scope.eligible)
+        googleDataAccess = {
+          status: "unavailable",
+          message:
+            scope.denialReason ??
+            "Choose an eligible model to access Google data.",
+        };
+      else if (
+        scope.provider === "openrouter" &&
+        scope.modelId &&
+        scope.modelId !== "openrouter/auto"
+      ) {
+        const zdrModels = await this.#models.zdrModelIds?.();
+        if (zdrModels && !zdrModels.includes(scope.modelId))
+          googleDataAccess = {
+            status: "unavailable",
+            message:
+              "Gmail, Calendar and Drive tools are available, but OpenRouter does not currently list a ZDR endpoint for the selected model. Choose another OpenRouter model marked ZDR available, or an eligible direct API account, then retry. Do not describe this as a missing email tool.",
+          };
+      }
+    }
+    return googleDataAccess ? { googleDataAccess } : {};
   }
 
   async describeConnectionTools(
@@ -704,6 +780,16 @@ export class LocalApplication {
       return {
         connectionId: selected.connection.id,
         connectionName: selected.name,
+        totalMatches: matchingDescriptors.length,
+        truncated: matchingDescriptors.length > boundedLimit,
+        ...(await this.googleDiscoveryNotice(
+          isGoogleConnection(selected.connection) ||
+            isGoogleApiManifest(
+              selected.connection.manifestId
+                ? this.connectorManifest(selected.connection.manifestId)
+                : undefined,
+            ),
+        )),
         tools: matchingDescriptors
           .slice(0, boundedLimit)
           .map((descriptor) =>
@@ -737,6 +823,7 @@ export class LocalApplication {
         readonly score: number;
       }
     > = [];
+    const googleConnectionIds = new Set<string>();
     let searchedConnections = 0;
     let unavailableConnections = 0;
     const unavailableConnectionIds: string[] = [];
@@ -744,6 +831,13 @@ export class LocalApplication {
     for (const row of connectedRows.slice(0, 100)) {
       try {
         const selected = this.assistantConnection(row.id);
+        if (
+          isGoogleConnection(selected.connection) ||
+          isGoogleApiManifest(
+            row.manifestId ? this.connectorManifest(row.manifestId) : undefined,
+          )
+        )
+          googleConnectionIds.add(selected.connection.id);
         const stored = this.storedConnectionToolDescriptors(
           selected.connection,
         );
@@ -792,6 +886,11 @@ export class LocalApplication {
 
     return {
       query: query.trim(),
+      totalMatches: matches.length,
+      truncated: matches.length > boundedLimit,
+      ...(await this.googleDiscoveryNotice(
+        matches.some((match) => googleConnectionIds.has(match.connectionId)),
+      )),
       searchedConnections,
       unavailableConnections,
       ...(unavailableConnectionIds.length
@@ -801,6 +900,9 @@ export class LocalApplication {
         .sort(
           (left, right) =>
             right.score - left.score ||
+            Number(right.effect === "read") - Number(left.effect === "read") ||
+            Number(/^(search|list)_/.test(right.toolName)) -
+              Number(/^(search|list)_/.test(left.toolName)) ||
             left.connectionName.localeCompare(right.connectionName) ||
             left.toolName.localeCompare(right.toolName),
         )
@@ -1694,6 +1796,13 @@ export class LocalApplication {
     };
   }
 
+  isGoogleDataProtected(id: string): boolean {
+    return (
+      this.#enforceGoogleDataProtection &&
+      new GoogleDataProtection(this.db).has(id)
+    );
+  }
+
   async listTasks(): Promise<readonly TaskSummaryDto[]> {
     const taskRows = this.db
       .select()
@@ -1703,6 +1812,7 @@ export class LocalApplication {
     const toolRows = this.db
       .select({
         taskId: taskTools.taskId,
+        manifestId: connections.manifestId,
         connectionId: taskTools.connectionId,
         connectionName: connections.name,
         sourceId: connections.sourceId,
@@ -1791,6 +1901,14 @@ export class LocalApplication {
       ...(task.lastScheduleRecovery
         ? { lastScheduleRecovery: task.lastScheduleRecovery }
         : {}),
+      googleDataProtected:
+        this.#enforceGoogleDataProtection &&
+        (new GoogleDataProtection(this.db).has(`task:${task.id}`) ||
+          toolRows.some(
+            (tool) =>
+              tool.taskId === task.id &&
+              isGoogleConnection({ manifestId: tool.manifestId ?? undefined }),
+          )),
       connectionNames: [...(namesByTask.get(task.id) ?? [])],
       ...recipeHosting(
         [...(hostingConnectionsByTask.get(task.id)?.entries() ?? [])].map(
@@ -2453,6 +2571,17 @@ export class LocalApplication {
     };
     if (input.modelSelection) {
       await this.assertSelectableModel(input.modelSelection, true);
+      const recipe = (await this.listTasks()).find(
+        (item) => item.id === taskId,
+      );
+      if (recipe?.googleDataProtected) {
+        new GoogleDataProtection(this.db).mark(`task:${taskId}`);
+        new GoogleDataProtection(this.db).scope(
+          `task:${taskId}`,
+          input.modelSelection.providerId,
+          input.modelSelection.modelId,
+        );
+      }
     }
     if (input.imageModelSelection) {
       await this.assertSelectableImageModel(input.imageModelSelection);
@@ -2620,7 +2749,7 @@ export class LocalApplication {
         descriptors = await this.taskToolDescriptors(taskId);
       }
       await this.assertImageGenerationReady(taskId);
-      return await this.#resolveModelExecution(
+      const execution = await this.#resolveModelExecution(
         task.modelProviderId && task.modelId
           ? {
               providerId: task.modelProviderId,
@@ -2631,6 +2760,18 @@ export class LocalApplication {
           descriptors.map((descriptor) => ({ descriptor })),
         ),
       );
+      const summary = (await this.listTasks()).find(
+        (item) => item.id === taskId,
+      );
+      if (summary?.googleDataProtected) {
+        new GoogleDataProtection(this.db).mark(`task:${taskId}`);
+        new GoogleDataProtection(this.db).scope(
+          `task:${taskId}`,
+          execution.providerId,
+          execution.modelId,
+        );
+      }
+      return execution;
     } catch (error) {
       throw new TypeError(
         error instanceof Error ? error.message : String(error),
@@ -3278,6 +3419,18 @@ export class LocalApplication {
 
     return {
       ...card,
+      ...(["gmail", "google-calendar", "google-drive"].includes(
+        card.manifestId ?? card.id,
+      )
+        ? {
+            googleDataProtection: {
+              enforced: this.#enforceGoogleDataProtection,
+              openRouterConnected: Boolean(
+                await this.#credentials.get(openRouterCredentialRef),
+              ),
+            },
+          }
+        : {}),
       catalogSource,
       ...(transportDetails ? { transportDetails } : undefined),
       tools,
@@ -3427,6 +3580,32 @@ export class LocalApplication {
           inputModalities: ["text"],
         }))
       : [];
+    const zdrModels = active.has("openrouter")
+      ? await this.#models.zdrModelIds?.()
+      : undefined;
+    const compatibility = (model: ModelOptionDto): ModelOptionDto => ({
+      ...model,
+      googleDataCompatibility:
+        model.providerId !== "openrouter"
+          ? new GoogleDataProtection(this.db).eligible(model.providerId)
+            ? "available"
+            : "unavailable"
+          : zdrModels === undefined || model.modelId === "openrouter/auto"
+            ? "unknown"
+            : zdrModels.includes(model.modelId)
+              ? "available"
+              : "unavailable",
+      googleDataReason:
+        model.providerId !== "openrouter"
+          ? new GoogleDataProtection(this.db).eligible(model.providerId)
+            ? "Direct API route. Use an account with no-training terms and training opt-ins disabled; Gemini requires a billing-enabled project. Standard retention may apply."
+            : new GoogleDataProtection(this.db).denialReason(model.providerId)
+          : zdrModels === undefined || model.modelId === "openrouter/auto"
+            ? "ZDR availability checked when running; ZDR stays enforced."
+            : zdrModels.includes(model.modelId)
+              ? "ZDR endpoint listed · ZDR enforced when running."
+              : "No ZDR endpoint listed by OpenRouter.",
+    });
     const recipeModels = [
       ...availableModels,
       ...(codexModels ?? []),
@@ -3478,8 +3657,8 @@ export class LocalApplication {
 
     return {
       providers,
-      models: availableModels,
-      recipeModels,
+      models: availableModels.map(compatibility),
+      recipeModels: recipeModels.map(compatibility),
       imageModels,
       ...(defaultSelection ? { defaultSelection } : undefined),
       ...(researchDistillerSelection
@@ -3714,6 +3893,7 @@ export class LocalApplication {
   async researchDistillerRuntime(): Promise<
     ResearchDistillerRuntime | undefined
   > {
+    if (currentGoogleDataAccess()?.protected) return undefined;
     const setting = this.db
       .select()
       .from(modelSettings)
@@ -6127,6 +6307,9 @@ export class LocalApplication {
           descriptor.inputSchema,
           manifest.probe.input,
         );
+        if (this.#enforceGoogleDataProtection && currentGoogleDataAccess()) {
+          assertGoogleConnectionAccess(connection, manifest);
+        }
         await session.callTool(manifest.probe.tool, manifest.probe.input, {
           taskId: "connector-verification",
           runId: `connector-verification-${manifest.id}`,

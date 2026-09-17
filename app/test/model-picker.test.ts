@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compactInheritedModelLabel,
   defaultRecipeModelLabel,
+  modelMatchesSearch,
   providerTypeLabel,
 } from "../src/client/model-picker.tsx";
 
@@ -46,4 +47,29 @@ describe("model provider presentation", () => {
       }),
     ).toBe("Recipe default · Claude Sonnet");
   });
+});
+
+test("model search matches separated words, punctuation and provider across fields", () => {
+  const model = {
+    providerId: "openrouter" as const,
+    modelId: "qwen/qwen3-coder-flash",
+    name: "Qwen: Qwen3 Coder Flash",
+  };
+  for (const query of [
+    "qwen flash",
+    "FLASH qwen",
+    "openrouter coder",
+    "qwen 3",
+    "qwen3-coder",
+    "",
+  ]) {
+    expect(modelMatchesSearch(model, query)).toBe(true);
+  }
+  expect(modelMatchesSearch(model, "qwen pro")).toBe(false);
+  expect(
+    modelMatchesSearch(
+      { ...model, name: "GPT-5.4 Mini", modelId: "openai/gpt-5.4-mini" },
+      "gpt 5.4 mini",
+    ),
+  ).toBe(true);
 });

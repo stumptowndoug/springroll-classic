@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { ExecutableTool } from "@springroll/kernel";
 import {
   type AgentRunner,
   AiSdkAgentRunner,
@@ -18,6 +19,7 @@ import {
   defaultXaiModelId,
   FilesystemArtifactBlobStore,
   findImageModelDefinition,
+  googleDataRouteAudit,
   type ImageGenerationToolRuntime,
   imageGenerationCardId,
   imageGenerationModelHandle,
@@ -36,12 +38,14 @@ import {
   SubscriptionRuntimeManager,
   standardModelProviderDefinitions,
   subscriptionRuntimeEnvironment,
+  ToolPolicyError,
   tasks,
   webFetchProviderToolCapability,
   webResearchSelection,
   webSearchProviderToolCapability,
   XaiModelConnection,
 } from "@springroll/kernel";
+import type { ToolSet } from "ai";
 import { eq } from "drizzle-orm";
 import { LocalApplication } from "./server/application.ts";
 import {
@@ -62,6 +66,13 @@ import {
   chatExecutionLimits,
   readRecipeExecutionLimits,
 } from "./server/execution-settings.ts";
+import {
+  currentGoogleDataAccess,
+  type GoogleDataAccess,
+  GoogleDataProtection,
+  isGoogleConnection,
+  withGoogleDataAccess,
+} from "./server/google-data-protection.ts";
 import { createHttpApp, type HttpAppAssets } from "./server/http-app.ts";
 import { chooseImageModelForCall } from "./server/image-model-selection.ts";
 import {
@@ -136,7 +147,18 @@ const credentials = new MacOsKeychainCredentialStore(
     ? { service: process.env.SPRINGROLL_KEYCHAIN_SERVICE, legacyService: false }
     : {},
 );
-const models = new OpenRouterModelConnection(credentials);
+const models = new OpenRouterModelConnection(credentials, {
+  onGoogleDataRequest: (route) => {
+    localDatabase.db
+      .insert(googleDataRouteAudit)
+      .values({
+        id: crypto.randomUUID(),
+        ...route,
+        requestedAt: new Date(),
+      })
+      .run();
+  },
+});
 const openAiModels = new OpenAiModelConnection(credentials);
 const xaiModels = new XaiModelConnection(credentials);
 const standardModels = new StandardModelConnection(credentials);
@@ -161,6 +183,7 @@ const artifactBlobs = new FilesystemArtifactBlobStore(
   join(dirname(databasePath), "artifacts"),
 );
 const artifacts = new SqliteArtifactRepository(localDatabase.db);
+const googleProtection = new GoogleDataProtection(localDatabase.db);
 const imageGeneration: ImageGenerationToolRuntime = {
   async listModels() {
     return (await connectedImageModels()).map((model) => ({
@@ -172,6 +195,11 @@ const imageGeneration: ImageGenerationToolRuntime = {
     }));
   },
   async generate(input) {
+    if (currentGoogleDataAccess()?.protected) {
+      throw new ToolPolicyError(
+        "The image-generation route cannot yet enforce the Google-data AI policy. Use a separate conversation without Google data for image generation.",
+      );
+    }
     const setting = localDatabase.db
       .select()
       .from(modelSettings)
@@ -250,126 +278,99 @@ const imageGenerationSource = createImageGenerationToolSource({
 const modelCatalog = new SpringrollModelCatalog(runtimePaths.modelCatalogPath);
 const agent: AgentRunner = {
   async run(request) {
-    const requiredCapabilities = requiredProviderToolCapabilities(
-      request.tools,
-    );
-    const execution = await resolveModelExecution(
+    const hasGoogleTools = request.tools.some((tool) => {
+      const connection = localDatabase.db
+        .select()
+        .from(connections)
+        .where(eq(connections.id, tool.policy.connectionId))
+        .get();
+      return (
+        connection &&
+        isGoogleConnection({ manifestId: connection.manifestId ?? undefined })
+      );
+    });
+    if (hasGoogleTools) googleProtection.mark(`task:${request.task.id}`);
+    const selected = await resolveModelExecution(
       request.task.modelSelection,
-      requiredCapabilities,
+      requiredProviderToolCapabilities(request.tools),
     );
-    const catalog = await modelCatalog.read().catch(
-      (): ModelCatalogSnapshot => ({
-        models: [],
-        imageModels: [],
-        stale: true,
-      }),
+    const scope = googleProtection.scope(
+      `task:${request.task.id}`,
+      selected.providerId,
+      selected.modelId,
     );
-    const catalogModel = catalog.models.find(
-      (model) =>
-        model.providerId === execution.providerId &&
-        model.modelId === execution.modelId,
+    return withGoogleDataAccess(scope, () => runAgent(request, selected));
+  },
+};
+async function runAgent(
+  request: Parameters<AgentRunner["run"]>[0],
+  execution: ModelExecutionDto,
+) {
+  const catalog = await modelCatalog.read().catch(
+    (): ModelCatalogSnapshot => ({
+      models: [],
+      imageModels: [],
+      stale: true,
+    }),
+  );
+  const catalogModel = catalog.models.find(
+    (model) =>
+      model.providerId === execution.providerId &&
+      model.modelId === execution.modelId,
+  );
+  const pricing = catalogModelPricing(catalogModel);
+  const runnerExecutionLimits = readRecipeExecutionLimits(localDatabase.db);
+  const { maxSteps } = runnerExecutionLimits;
+  if (!request.continuation) {
+    await request.eventSink?.append(
+      {
+        type: "model_selection",
+        provider: execution.providerId,
+        modelId: execution.modelId,
+        billing:
+          execution.providerId === "codex" || execution.providerId === "claude"
+            ? "subscription"
+            : "metered",
+        ...(execution.providerId === "codex" || maxSteps === 0
+          ? undefined
+          : { maxSteps }),
+        ...(catalog.revision
+          ? { catalogRevision: catalog.revision }
+          : undefined),
+        ...(pricing
+          ? {
+              inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+              outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
+            }
+          : undefined),
+      },
+      new Date(),
     );
-    const pricing = catalogModelPricing(catalogModel);
-    const runnerExecutionLimits = readRecipeExecutionLimits(localDatabase.db);
-    const { maxSteps } = runnerExecutionLimits;
-    if (!request.continuation) {
-      await request.eventSink?.append(
-        {
-          type: "model_selection",
-          provider: execution.providerId,
-          modelId: execution.modelId,
-          billing:
-            execution.providerId === "codex" ||
-            execution.providerId === "claude"
-              ? "subscription"
-              : "metered",
-          ...(execution.providerId === "codex" || maxSteps === 0
-            ? undefined
-            : { maxSteps }),
-          ...(catalog.revision
-            ? { catalogRevision: catalog.revision }
-            : undefined),
-          ...(pricing
-            ? {
-                inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
-                outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
-              }
-            : undefined),
-        },
-        new Date(),
-      );
-    }
+  }
 
-    if (execution.providerId === "openrouter") {
-      const runtime = await models.loadAgentRuntime(
-        openRouterCredentialRef,
-        execution.modelId,
-      );
-      return new AiSdkAgentRunner(runtime.model, {
-        artifactReader: artifacts,
-        ...runnerExecutionLimits,
-        ...(pricing ? { pricing } : undefined),
-        providerTools: providerToolBindingsForExecution(
-          runtime.providerTools,
-          execution,
-        ),
-        providerUsage: runtime.providerUsage,
-        ...(catalog.revision
-          ? { catalogRevision: catalog.revision }
-          : undefined),
-        emitModelSelection: false,
-      }).run(request);
-    }
-    if (execution.providerId === "openai") {
-      const model = await openAiModels.loadModel(
-        openAiCredentialRef,
-        execution.modelId,
-      );
-      return new AiSdkAgentRunner(model, {
-        artifactReader: artifacts,
-        ...runnerExecutionLimits,
-        ...(pricing ? { pricing } : undefined),
-        ...(catalog.revision
-          ? { catalogRevision: catalog.revision }
-          : undefined),
-        emitModelSelection: false,
-      }).run(request);
-    }
-    if (execution.providerId === "codex") {
-      return new CodexAgentRunner(execution.modelId, {
-        maxSteps,
-        emitModelSelection: false,
-        spawn: codexSpawn,
-      }).run(request);
-    }
-    if (execution.providerId === "claude") {
-      const claudeRuntime = await claudeSubscription.runtime();
-      return new ClaudeAgentRunner(execution.modelId, {
-        maxSteps,
-        emitModelSelection: false,
-        executable: claudeRuntime.executable,
-        env: claudeRuntime.env,
-      }).run(request);
-    }
-    if (execution.providerId === "xai") {
-      const runtime = await xaiModels.loadAgentRuntime(
-        xaiCredentialRef,
-        execution.modelId,
-      );
-      return new AiSdkAgentRunner(runtime.model, {
-        artifactReader: artifacts,
-        ...runnerExecutionLimits,
-        ...((pricing ?? runtime.pricing)
-          ? { pricing: pricing ?? runtime.pricing }
-          : undefined),
-        ...(catalog.revision
-          ? { catalogRevision: catalog.revision }
-          : undefined),
-        emitModelSelection: false,
-      }).run(request);
-    }
-    const model = await standardModels.loadModel(
-      execution.providerId,
+  if (execution.providerId === "openrouter") {
+    const scope = currentGoogleDataAccess();
+    const runtime = await models.loadAgentRuntime(
+      openRouterCredentialRef,
+      execution.modelId,
+      () => scope?.protected === true,
+    );
+    return new AiSdkAgentRunner(runtime.model, {
+      artifactReader: artifacts,
+      ...runnerExecutionLimits,
+      ...(pricing ? { pricing } : undefined),
+      providerTools: providerToolBindingsForExecution(
+        runtime.providerTools,
+        execution,
+      ),
+      providerUsage: runtime.providerUsage,
+      ...(catalog.revision ? { catalogRevision: catalog.revision } : undefined),
+      emitModelSelection: false,
+    }).run(request);
+  }
+  if (execution.providerId === "openai") {
+    const model = await openAiModels.loadModel(
+      openAiCredentialRef,
       execution.modelId,
     );
     return new AiSdkAgentRunner(model, {
@@ -379,12 +380,60 @@ const agent: AgentRunner = {
       ...(catalog.revision ? { catalogRevision: catalog.revision } : undefined),
       emitModelSelection: false,
     }).run(request);
-  },
-};
-const loadAssistantRuntime = async (selection?: {
-  readonly providerId: string;
-  readonly modelId: string;
-}) => {
+  }
+  if (execution.providerId === "codex") {
+    return new CodexAgentRunner(execution.modelId, {
+      maxSteps,
+      emitModelSelection: false,
+      spawn: codexSpawn,
+    }).run(request);
+  }
+  if (execution.providerId === "claude") {
+    const claudeRuntime = await claudeSubscription.runtime();
+    return new ClaudeAgentRunner(execution.modelId, {
+      maxSteps,
+      emitModelSelection: false,
+      executable: claudeRuntime.executable,
+      env: claudeRuntime.env,
+    }).run(request);
+  }
+  if (execution.providerId === "xai") {
+    const runtime = await xaiModels.loadAgentRuntime(
+      xaiCredentialRef,
+      execution.modelId,
+    );
+    return new AiSdkAgentRunner(runtime.model, {
+      artifactReader: artifacts,
+      ...runnerExecutionLimits,
+      ...((pricing ?? runtime.pricing)
+        ? { pricing: pricing ?? runtime.pricing }
+        : undefined),
+      ...(catalog.revision ? { catalogRevision: catalog.revision } : undefined),
+      emitModelSelection: false,
+    }).run(request);
+  }
+  const model = await standardModels.loadModel(
+    execution.providerId,
+    execution.modelId,
+  );
+  return new AiSdkAgentRunner(model, {
+    artifactReader: artifacts,
+    ...runnerExecutionLimits,
+    ...(pricing ? { pricing } : undefined),
+    ...(catalog.revision ? { catalogRevision: catalog.revision } : undefined),
+    emitModelSelection: false,
+  }).run(request);
+}
+
+const loadAssistantRuntime = async (
+  selection:
+    | {
+        readonly providerId: string;
+        readonly modelId: string;
+      }
+    | undefined,
+  googleData: () => boolean,
+) => {
   const execution = await resolveModelExecution(selection, [], true);
   const catalog = await modelCatalog.read().catch(
     (): ModelCatalogSnapshot => ({
@@ -437,7 +486,11 @@ const loadAssistantRuntime = async (selection?: {
   }
   if (execution.providerId === "openrouter") {
     return {
-      model: await models.loadModel(openRouterCredentialRef, execution.modelId),
+      model: await models.loadModel(
+        openRouterCredentialRef,
+        execution.modelId,
+        googleData,
+      ),
       provider: execution.providerId,
       modelId: execution.modelId,
       inputModalities: catalogModel?.inputModalities ?? ["text"],
@@ -495,8 +548,7 @@ const configuredConnectorOAuthClients = connectorOAuthClientsFromEnvironment(
   process.env,
 );
 const application = new LocalApplication(localDatabase.db, {
-  googleOAuthWriteStaging:
-    process.env.SPRINGROLL_GOOGLE_OAUTH_WRITE_STAGING === "1",
+  enforceGoogleDataProtection: true,
   credentials,
   models,
   openAiModels,
@@ -527,12 +579,18 @@ application.ensureBuiltinConnections();
 await seedStarterRecipe(application, databasePath);
 await application.migrateBuiltInToolPins();
 const applicationTools = createSpringrollApplicationToolRegistry(application);
-if (process.argv.includes("--mcp-stdio")) {
-  await runStdioMcp(applicationTools);
-}
-const assistantTools = createAiSdkApplicationTools(applicationTools, {
-  exclude: legacyAssistantConnectorProposalTools,
+const externalApplicationTools = googleProtection.registry(applicationTools, {
+  eligible: false,
+  protected: false,
+  protect: () => {
+    throw new ToolPolicyError(
+      "Google-derived workspace data is unavailable through external MCP. Use an OpenRouter model with enforced ZDR in Springroll.",
+    );
+  },
 });
+if (process.argv.includes("--mcp-stdio")) {
+  await runStdioMcp(externalApplicationTools);
+}
 const assistant = new AiSdkAssistant(localDatabase.db, {
   maxSteps: chatExecutionLimits.maxSteps,
   artifacts,
@@ -542,7 +600,18 @@ const assistant = new AiSdkAssistant(localDatabase.db, {
     propose_connection: "connection_setup",
   },
   loadRuntime: async (selection, context) => {
-    const runtime = await loadAssistantRuntime(selection);
+    let requestScope: GoogleDataAccess | undefined;
+    const runtime = await loadAssistantRuntime(
+      selection,
+      () => requestScope?.protected === true,
+    );
+    const scope = googleProtection.scope(
+      `chat:${context?.sessionId ?? "unscoped"}`,
+      runtime.provider,
+      runtime.modelId,
+    );
+    requestScope = scope;
+    const guardedTools = googleProtection.registry(applicationTools, scope);
     const approvalPolicies = Object.fromEntries([
       ...applicationTools.definitions.map(
         (definition) =>
@@ -554,10 +623,10 @@ const assistant = new AiSdkAssistant(localDatabase.db, {
       ["generate_image", { riskEffect: "write" as const }],
     ]);
     if ("kind" in runtime && runtime.kind === "subscription") {
-      const tools = context
+      const tools = context?.turnId
         ? [
             ...createAgentApplicationTools(
-              applicationTools,
+              guardedTools,
               { turnId: context.turnId },
               { exclude: legacyAssistantConnectorProposalTools },
             ),
@@ -575,31 +644,50 @@ const assistant = new AiSdkAssistant(localDatabase.db, {
             ),
           ]
         : [];
-      return { ...runtime, tools, approvalPolicies };
+      return {
+        ...runtime,
+        googleDataProtected: scope.protected,
+        tools: tools.map(
+          (tool): ExecutableTool => ({
+            ...tool,
+            execute: (input, ctx) =>
+              withGoogleDataAccess(scope, () => tool.execute(input, ctx)),
+          }),
+        ),
+        approvalPolicies,
+      };
+    }
+    const tools: ToolSet = {
+      ...createAiSdkApplicationTools(guardedTools, {
+        exclude: legacyAssistantConnectorProposalTools,
+      }),
+      ...(context?.turnId
+        ? {
+            generate_image: createAiSdkConnectionTool(
+              application,
+              imageGenerationToolDescriptor(await imageGeneration.listModels()),
+              imageGenerationCardId,
+              {
+                turnId: context.turnId,
+                artifactOwner: {
+                  kind: "chat_turn",
+                  id: context.turnId,
+                },
+              },
+            ),
+          }
+        : undefined),
+    };
+    for (const tool of Object.values(tools)) {
+      const execute = tool.execute;
+      if (execute)
+        tool.execute = (input, ctx) =>
+          withGoogleDataAccess(scope, () => execute(input, ctx));
     }
     return {
       ...runtime,
-      tools: {
-        ...assistantTools,
-        ...(context
-          ? {
-              generate_image: createAiSdkConnectionTool(
-                application,
-                imageGenerationToolDescriptor(
-                  await imageGeneration.listModels(),
-                ),
-                imageGenerationCardId,
-                {
-                  turnId: context.turnId,
-                  artifactOwner: {
-                    kind: "chat_turn",
-                    id: context.turnId,
-                  },
-                },
-              ),
-            }
-          : undefined),
-      },
+      googleDataProtected: scope.protected,
+      tools,
       approvalPolicies,
     };
   },
@@ -633,7 +721,7 @@ const taskRunHost = await createLocalRivetTaskHost({
 application.attachTaskRunHost(taskRunHost);
 
 const assets = await loadAssets();
-const mcp = createDevelopmentMcpEndpoint(applicationTools);
+const mcp = createDevelopmentMcpEndpoint(externalApplicationTools);
 const httpApp = createHttpApp(
   application,
   assets,

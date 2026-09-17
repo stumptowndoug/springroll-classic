@@ -1036,3 +1036,22 @@ describe("saved recipe receipts", () => {
     ).toBeUndefined();
   });
 });
+
+test("Google model compatibility notices are visible instead of a generic match count", () => {
+  const output = {
+    matches: [{ toolName: "search_threads" }],
+    googleDataAccess: {
+      status: "unavailable",
+      message: "Choose a ZDR-available model for Google data.",
+    },
+  };
+  for (const value of [output, { structuredContent: output }]) {
+    expect(
+      chatToolResultSummary({
+        type: "tool-search_connection_tools",
+        state: "output-available",
+        output: value,
+      }),
+    ).toEqual({ text: output.googleDataAccess.message, tone: "danger" });
+  }
+});

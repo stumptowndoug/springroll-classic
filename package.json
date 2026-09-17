@@ -16,7 +16,7 @@
     "release:mac": "bun desktop/release.ts --release",
     "check": "bun run lint && bun run typecheck && bun run test",
     "dev:mac": "bun desktop/dev.ts",
-    "dev:mac:google-verification": "bun desktop/dev.ts --google-verification",
+    "dev:mac:google-verification": "bun desktop/dev.ts",
     "dev:app": "bun --env-file=../.env run --cwd app dev",
     "dev:cli": "bun run --cwd cli dev",
     "format": "biome format --write .",

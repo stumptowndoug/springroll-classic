@@ -1,11 +1,11 @@
 # GitHub releases
 
-[v0.1.4](https://github.com/stumptowndoug/springroll/releases/tag/v0.1.4) is published
-as Mac friends-beta build 9: compact chat approvals, durable subscription approval
-decisions, and current native connector discovery. Release identity remains
-`com.springroll.desktop`; existing release data stays in place. v0.1.3 remains
-available for rollback. Google write tools remain verification-only; OpenRouter
-ZDR enforcement is not part of this release.
+v0.1.5 is the next Mac friends-beta, build 10. It adds Google-scoped OpenRouter
+ZDR enforcement, clearer Gmail discovery, a model filter, and compatibility checks
+for installed subscription runtimes. Direct API providers remain available without
+a manual confirmation gate. Google OAuth verification remains pending.
+Release identity remains `com.springroll.desktop`; existing release data stays in
+place. v0.1.4 remains available for rollback.
 Reserve v1.0.0 for a later stability milestone.
 
 ## Before publication
@@ -16,7 +16,7 @@ Reserve v1.0.0 for a later stability milestone.
    artifact for secrets and private examples. Private OAuth account details and
    verification video references belong outside Git. A current-file pattern scan
    is not a substitute for reviewing history.
-3. Build from the intended clean release revision with `SPRINGROLL_BUILD_NUMBER=9`
+3. Build from the intended clean release revision with `SPRINGROLL_BUILD_NUMBER=10`
    and `bun run release:mac`, supplying private signing/OAuth environment values
    as described in [desktop README](../desktop/README.md#signed-friends-beta-build).
    Build 2 contains the context fix but predates the later startup, sample recipe,
@@ -32,13 +32,13 @@ Reserve v1.0.0 for a later stability milestone.
 ## GitHub assets and website
 
 Use GitHub Releases on `stumptowndoug/springroll`. Attach the final stapled
-`Springroll-0.1.4-arm64.dmg` as the recommended installer, the ZIP alternative,
+`Springroll-0.1.5-arm64.dmg` as the recommended installer, the ZIP alternative,
 SHA-256 checksums, and short release notes describing
 supported Macs, setup, local scheduling limitations, provider verification status,
 and known issues. Do not attach the temporary notarization ZIP, signing materials,
 OAuth `.env`, runtime logs, databases, or private verification evidence.
 
-Tag the exact tested commit as `v0.1.4`. Prepare the release as a draft first;
+Tag the exact tested commit as `v0.1.5`. Prepare the release as a draft first;
 publish only after acceptance. Link the website Download button to the specific
 published beta release or its asset. Do not rely on `/releases/latest` selecting
 a prerelease. The website Download

@@ -29,6 +29,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./host/rivet-local-task-host": "./src/host/rivet-local-task-host.ts",
+    "./google-data-policy": "./src/google-data-policy.ts",
     "./tool-result-summary": "./src/tool-result-summary.ts",
     "./tool-part-result": "./src/tool-part-result.ts"
   }

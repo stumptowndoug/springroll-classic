@@ -116,6 +116,8 @@ export interface ModelExecutionDto extends ModelSelectionDto {
 }
 
 export interface ModelOptionDto extends ModelSelectionDto {
+  readonly googleDataCompatibility?: "available" | "unavailable" | "unknown";
+  readonly googleDataReason?: string;
   readonly name: string;
   readonly description?: string;
   readonly contextTokens?: number;
@@ -287,6 +289,7 @@ export interface RunEventPageDto {
 export const starterRecipeId = "example-morning-brief-v1";
 
 export interface TaskSummaryDto {
+  readonly googleDataProtected?: boolean;
   readonly id: string;
   readonly name: string;
   /** Optional single organizing tag, e.g. "news". */
@@ -613,6 +616,10 @@ export interface ConnectionToolDto {
 }
 
 export interface ConnectionDetailDto extends ConnectionCardDto {
+  readonly googleDataProtection?: {
+    readonly enforced: boolean;
+    readonly openRouterConnected: boolean;
+  };
   readonly catalogSource: "live" | "last-discovered" | "unavailable";
   readonly transportDetails?: ConnectionTransportDetailsDto;
   readonly tools: readonly ConnectionToolDto[];
@@ -902,6 +909,7 @@ export interface ToolApprovalDto {
 }
 
 export interface ChatDetailDto {
+  readonly googleDataProtected?: boolean;
   readonly session: ChatSessionDto;
   readonly messages: readonly AssistantMessageDto[];
   readonly turns: readonly ChatTurnDto[];

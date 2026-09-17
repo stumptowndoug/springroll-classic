@@ -6,7 +6,7 @@ alternative; updates are manual.
 
 ## Install and try it
 
-1. Download the DMG from [v0.1.4](https://github.com/stumptowndoug/springroll/releases/tag/v0.1.4) and open it.
+1. Download the DMG from [v0.1.5](https://github.com/stumptowndoug/springroll/releases/tag/v0.1.5) and open it.
 2. Drag Springroll onto Applications in the installer window. Eject the disk image, then open Springroll from Applications.
 3. Open Settings and connect a supported model provider. Choose a default model.
 4. Connect Google or Microsoft from Integrations. Google access is currently
@@ -45,7 +45,7 @@ content. Runtime logs can contain private data; review them before sharing.
 ## Ongoing beta acceptance coverage
 
 The owner reported successful testing and approved the public
-[v0.1.4 beta](https://github.com/stumptowndoug/springroll/releases/tag/v0.1.4).
+[v0.1.5 beta](https://github.com/stumptowndoug/springroll/releases/tag/v0.1.5).
 The detailed scenarios below remain useful for broader tester coverage.
 
 - [ ] Verify downloaded ZIP extraction and launch on another Mac/account.

@@ -1363,7 +1363,7 @@ export function createSpringrollApplicationToolRegistry(
     defineApplicationTool({
       name: "search_connection_tools",
       description:
-        "Search every locally connected Springroll ToolSource for a capability. Returns compact ranked connection/tool names, descriptions, and effects—never input schemas or credentials. If connectionsNeedingAttention is present, the requested integration is installed but unavailable: tell the user to reconnect it at the returned path before retrying the service request. Activate exact tool matches before calling or drafting with them.",
+        "Search every locally connected Springroll ToolSource for a capability. Returns compact ranked connection/tool names, descriptions, and effects—never input schemas or credentials. If connectionsNeedingAttention is present, the requested integration is installed but unavailable: tell the user to reconnect it at the returned path before retrying the service request. Results may be truncated; never conclude a capability is missing from a partial result. Refine the query or describe the connection. If googleDataAccess reports unavailable, explain its model requirement instead of saying the service lacks tools. Activate exact tool matches before calling or drafting with them.",
       inputSchema: z.object({
         query: z.string().trim().min(1).max(100),
         limit: z.number().int().min(1).max(25).optional().default(10),
@@ -1425,7 +1425,7 @@ export function createSpringrollApplicationToolRegistry(
     defineApplicationTool({
       name: "describe_connection_tools",
       description:
-        "Browse one connected Springroll ToolSource on demand, including concise tool descriptions and normalized read/write/destructive risk. Input and output schemas are intentionally omitted during discovery. Use a query and small limit when possible, then activate exact matches to load their current input contracts before calling or drafting with them.",
+        "Browse one connected Springroll ToolSource on demand, including concise tool descriptions and normalized read/write/destructive risk. Input and output schemas are intentionally omitted during discovery. Use a query and small limit when possible, then activate exact matches to load their current input contracts before calling or drafting with them. Results are query-filtered and may be truncated: broaden or remove the query before claiming a capability is missing. If googleDataAccess reports unavailable, explain that model requirement rather than proposing another connection.",
       inputSchema: z.object({
         connectionId: z.string().min(1),
         query: z.string().max(100).optional(),

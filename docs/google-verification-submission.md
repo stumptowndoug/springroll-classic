@@ -43,11 +43,11 @@ was sent or compliance attestation made. The private video URL stays outside Git
   reconnect/authorize Save drafts. This does not revoke previously issued broad
   Google tokens; revoke the old Google grant before reconnecting to remove them.
 - Drive write operations and the broad `drive` scope have been removed.
-- Default application startup removes Google write tools and permission upgrades;
-  only explicit `SPRINGROLL_GOOGLE_OAUTH_WRITE_STAGING=1` enables the submitted
-  Gmail/Calendar write choices for local verification.
-- Keep default account connections read-only. Show optional sending, drafts, and
-  event-management upgrades separately. OAuth scope overlaps must be disclosed:
+- September 16 owner update: the write-scope staging gate has been removed.
+  Normal setup exposes Gmail sending/drafts and Calendar event permissions;
+  existing read-only accounts still require fresh consent. This is an app change,
+  not evidence of Google approval.
+- Show granular sending, drafts, and event-management permissions. OAuth scope overlaps must be disclosed:
   app-level action choices do not narrow the Google token's capabilities.
 - Follow Google's review instruction: trigger new unverified scopes only in
   staging/hidden test routes; do not deploy them to production traffic. Keep the

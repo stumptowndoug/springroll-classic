@@ -6,6 +6,8 @@ import type {
   ModelSettingsDto,
 } from "../shared.ts";
 
+import { SettingsPicker } from "./settings-picker.tsx";
+
 export function ModelPicker({
   models,
   value,
@@ -15,7 +17,11 @@ export function ModelPicker({
   align = "start",
   compact = false,
   openUp = false,
+  googleDataProtected = false,
+  inheritedValue,
 }: {
+  readonly googleDataProtected?: boolean | undefined;
+  readonly inheritedValue?: ModelSelectionDto | undefined;
   readonly models: readonly ModelOptionDto[];
   readonly value: ModelSelectionDto | undefined;
   readonly inheritLabel: string;
@@ -30,7 +36,20 @@ export function ModelPicker({
   const [providerFilter, setProviderFilter] = useState<ModelProviderId | "all">(
     "all",
   );
+  const [zdrOnly, setZdrOnly] = useState(false);
   const [active, setActive] = useState(0);
+  const unavailable = (model: ModelOptionDto | undefined) =>
+    googleDataProtected &&
+    (!model ||
+      model.googleDataCompatibility === "unavailable" ||
+      !model.googleDataCompatibility);
+  const inheritedModel = models.find(
+    (model) =>
+      model.providerId === inheritedValue?.providerId &&
+      model.modelId === inheritedValue?.modelId,
+  );
+  const inheritUnavailable = unavailable(inheritedModel);
+
   const searchRef = useRef<HTMLInputElement>(null);
 
   const selected = value
@@ -51,22 +70,22 @@ export function ModelPicker({
 
   const normalizedQuery = query.trim().toLowerCase();
   const providers = modelProviders(models);
+  const filteredModels = models.filter(
+    (model) =>
+      !zdrOnly ||
+      model.providerId !== "openrouter" ||
+      model.googleDataCompatibility === "available",
+  );
   const providerModels =
     providerFilter === "all"
-      ? models
-      : models.filter((model) => model.providerId === providerFilter);
-  const visibleModels = normalizedQuery
-    ? providerModels.filter(
-        (model) =>
-          model.name.toLowerCase().includes(normalizedQuery) ||
-          model.modelId.toLowerCase().includes(normalizedQuery) ||
-          providerName(model.providerId)
-            .toLowerCase()
-            .includes(normalizedQuery),
-      )
-    : providerModels;
+      ? filteredModels
+      : filteredModels.filter((model) => model.providerId === providerFilter);
+  const visibleModels = providerModels.filter((model) =>
+    modelMatchesSearch(model, query),
+  );
   const grouped = groupModels(visibleModels);
-  const showInherit = normalizedQuery === "" && providerFilter === "all";
+  const showInherit =
+    normalizedQuery === "" && providerFilter === "all" && !zdrOnly;
   const optionCount = visibleModels.length + (showInherit ? 1 : 0);
   const flatIndexByModel = new Map(
     visibleModels.map((model, index) => [
@@ -82,6 +101,7 @@ export function ModelPicker({
   }, [open]);
 
   const choose = (option: ModelOptionDto | null) => {
+    if (option ? unavailable(option) : inheritUnavailable) return;
     setOpen(false);
     onChange(
       option
@@ -98,7 +118,8 @@ export function ModelPicker({
       choose(null);
       return;
     }
-    choose(visibleModels[active - (showInherit ? 1 : 0)] ?? null);
+    const option = visibleModels[active - (showInherit ? 1 : 0)];
+    if (option) choose(option);
   };
 
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -137,6 +158,7 @@ export function ModelPicker({
         onClick={() => {
           setQuery("");
           setProviderFilter("all");
+          setZdrOnly(false);
           setActive(0);
           setOpen((wasOpen) => !wasOpen);
         }}
@@ -147,6 +169,19 @@ export function ModelPicker({
           {open ? "▴" : "▾"}
         </span>
       </button>
+      {googleDataProtected ? (
+        <small
+          className={
+            unavailable(value ? selected : inheritedModel)
+              ? "execution-error"
+              : undefined
+          }
+        >
+          {unavailable(value ? selected : inheritedModel)
+            ? "Uses Google data · Choose a compatible model."
+            : "Uses Google data · Compatible providers only."}
+        </small>
+      ) : null}
       {!compact && models.length === 0 ? (
         <small>Connect an AI provider to choose a model.</small>
       ) : null}
@@ -159,32 +194,50 @@ export function ModelPicker({
             type="button"
           />
           <div
-            className={`combo-panel${align === "end" ? " align-end" : ""}${
+            className={`combo-panel model-catalog-panel${align === "end" ? " align-end" : ""}${
               openUp ? " open-up" : ""
             }`}
           >
             {providers.length > 1 ? (
-              <label className="combo-provider-filter">
+              <div className="combo-provider-filter">
                 <span>Provider</span>
-                <select
-                  aria-label="Filter models by provider"
-                  onChange={(event) => {
-                    setProviderFilter(
-                      event.target.value as ModelProviderId | "all",
-                    );
+                <SettingsPicker
+                  className="model-filter-picker"
+                  label="Filter models by provider"
+                  disabled={false}
+                  value={providerFilter}
+                  options={[
+                    { value: "all", label: "All providers" },
+                    ...providers.map((providerId) => ({
+                      value: providerId,
+                      label: providerName(providerId),
+                    })),
+                  ]}
+                  onChange={(value) => {
+                    setProviderFilter(value as ModelProviderId | "all");
                     setActive(0);
                   }}
-                  value={providerFilter}
+                />
+              </div>
+            ) : null}
+            {providers.includes("openrouter") ? (
+              <div className="combo-provider-filter">
+                <span>Zero Data Retention</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Zero Data Retention"
+                  aria-checked={zdrOnly}
+                  title="Filter OpenRouter models to Zero Data Retention endpoints; other providers remain visible"
+                  className="model-zdr-toggle"
+                  onClick={() => {
+                    setZdrOnly((enabled) => !enabled);
+                    setActive(0);
+                  }}
                 >
-                  <option value="all">All providers</option>
-                  {providers.map((providerId) => (
-                    <option key={providerId} value={providerId}>
-                      {providerName(providerId)} ·{" "}
-                      {providerTypeLabel(providerId)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <span aria-hidden="true" />
+                </button>
+              </div>
             ) : null}
             <div className="combo-search">
               <span aria-hidden="true">⌕</span>
@@ -204,6 +257,7 @@ export function ModelPicker({
               {showInherit ? (
                 <button
                   aria-selected={!value}
+                  aria-disabled={inheritUnavailable}
                   className={`${optionClass(0, !value)} combo-default`}
                   onClick={() => choose(null)}
                   onMouseEnter={() => setActive(0)}
@@ -215,6 +269,11 @@ export function ModelPicker({
                     ✓
                   </span>
                   <span className="combo-name">{inheritLabel}</span>
+                  {inheritUnavailable ? (
+                    <span className="combo-facts">
+                      Choose a compatible model explicitly
+                    </span>
+                  ) : null}
                 </button>
               ) : null}
               {visibleModels.length === 0 ? (
@@ -235,6 +294,12 @@ export function ModelPicker({
                     return (
                       <button
                         aria-selected={isSelected}
+                        aria-disabled={unavailable(model)}
+                        title={
+                          googleDataProtected
+                            ? model.googleDataReason
+                            : undefined
+                        }
                         className={optionClass(index, isSelected)}
                         key={modelValue(model)}
                         onClick={() => choose(model)}
@@ -247,6 +312,20 @@ export function ModelPicker({
                           ✓
                         </span>
                         <span className="combo-name">{model.name}</span>
+                        {googleDataProtected ||
+                        model.providerId === "openrouter" ? (
+                          <span className="combo-facts">
+                            {model.googleDataCompatibility === "available"
+                              ? model.providerId === "openrouter"
+                                ? "ZDR available"
+                                : "Direct API"
+                              : model.googleDataCompatibility === "unavailable"
+                                ? model.providerId === "openrouter"
+                                  ? "No ZDR endpoint"
+                                  : "Google data unavailable"
+                                : "ZDR availability unknown"}
+                          </span>
+                        ) : null}
                         {facts ? (
                           <span className="combo-facts">{facts}</span>
                         ) : null}
@@ -261,6 +340,25 @@ export function ModelPicker({
       ) : null}
     </div>
   );
+}
+
+/** Match all search words across the label, ID, and provider, ignoring punctuation. */
+export function modelMatchesSearch(
+  model: Pick<ModelOptionDto, "name" | "modelId" | "providerId">,
+  query: string,
+): boolean {
+  const compact = (text: string) =>
+    text.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const fields = [
+    model.name,
+    model.modelId,
+    providerName(model.providerId),
+  ].map(compact);
+  return query
+    .trim()
+    .split(/\s+/)
+    .map(compact)
+    .every((word) => fields.some((field) => field.includes(word)));
 }
 
 export function compactInheritedModelLabel(label: string): string {

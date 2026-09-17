@@ -16,7 +16,7 @@ await mkdir(lock).catch(() => {
 
 try {
   // Build completely before touching the running app or the last good build.
-  const { app, googleVerification } = await import("./package.ts");
+  const { app } = await import("./package.ts");
   const processes = Bun.spawn(["/bin/ps", "-axo", "pid=,comm="], {
     stdout: "pipe",
     stderr: "inherit",
@@ -76,12 +76,8 @@ try {
   }
   const current = join(destination, "Springroll Prototype.app");
   // LaunchServices does not inherit this shell's environment. Pass the local
-  // verification switch and registered OAuth clients explicitly to the app.
-  const launchArgs = [
-    "/usr/bin/open",
-    "--env",
-    `SPRINGROLL_GOOGLE_OAUTH_WRITE_STAGING=${googleVerification ? "1" : "0"}`,
-  ];
+  // registered OAuth clients explicitly to the app.
+  const launchArgs = ["/usr/bin/open"];
   for (const key of [
     "SPRINGROLL_GOOGLE_OAUTH_CLIENT_ID",
     "SPRINGROLL_GOOGLE_OAUTH_CLIENT_SECRET",

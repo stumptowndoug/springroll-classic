@@ -20,3 +20,6 @@ spikes/rivet-r0/.data/
 # Local editor and project-manager state
 .shep/
 .claude/settings.local.json
+
+# Private Google verification submission materials
+docs/google-verification-evidence/

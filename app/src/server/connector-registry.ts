@@ -154,7 +154,7 @@ const registryValues: readonly (readonly [
           {
             name: "search_threads",
             description:
-              "Search Gmail threads with Gmail search operators and pagination.",
+              "Search or list Gmail email messages and threads, including recent inbox mail. For latest inbox emails use query in:inbox and maxResults, then get_thread with a returned thread ID. Supports Gmail search operators and pagination.",
             method: "GET",
             path: "/users/me/threads",
             inputSchema: {

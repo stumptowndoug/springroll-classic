@@ -125,7 +125,9 @@ export function SubscriptionConnect({
         <>
           <p>
             {status
-              ? `Download ${name} support once to use this subscription. No compatible installation was found on this Mac.`
+              ? status.error
+                ? `Your installed ${name} needs attention. You can update it or use Springroll’s managed copy.`
+                : `Install ${name} on this Mac, or download a copy for Springroll to use.`
               : `Checking for ${name} on this Mac…`}
           </p>
           {status?.error ? (

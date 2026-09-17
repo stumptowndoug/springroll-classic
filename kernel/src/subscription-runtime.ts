@@ -38,9 +38,12 @@ export function compatibleRuntimeVersion(
 ): boolean {
   const a = actual.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
   const b = expected.match(/^(\d+)\.(\d+)\.(\d+)$/);
-  return Boolean(
-    a && b && a[1] === b[1] && a[2] === b[2] && Number(a[3]) >= Number(b[3]),
-  );
+  if (!a || !b) return false;
+  for (let index = 1; index <= 3; index++) {
+    const difference = Number(a[index]) - Number(b[index]);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
 }
 
 export function subscriptionRuntimeEnvironment(
@@ -201,13 +204,40 @@ export class SubscriptionRuntimeManager {
   async #discover(id: SubscriptionRuntimeId): Promise<string | undefined> {
     const spec = this.#specs[id];
     if (!spec) return undefined;
+    let detectedIssue: string | undefined;
     for (const path of this.#candidates(id)) {
       try {
         await access(path, constants.X_OK);
         const version = await command([path, "--version"]);
-        if (!compatibleRuntimeVersion(version, spec.cliVersion)) continue;
+        // The managed download version is not a minimum for user-installed CLIs.
+        // Gate on the entry points the adapters actually invoke instead.
+        const help = await command(
+          id === "codex" ? [path, "app-server", "--help"] : [path, "--help"],
+        );
+        const supported =
+          id === "codex"
+            ? help.includes("--stdio")
+            : [
+                "--input-format",
+                "--output-format",
+                "stream-json",
+                "--mcp-config",
+                "--strict-mcp-config",
+                "--permission-mode",
+                "--permission-prompts",
+                "--setting-sources",
+                "--settings",
+                "--no-session-persistence",
+                "--tools",
+              ].every((flag) => help.includes(flag));
+        if (!supported) {
+          detectedIssue = `Found ${version.trim()}, but it does not expose the integration commands Springroll needs. Update your installed CLI or download support.`;
+          continue;
+        }
+        const info = await stat(path);
         this.#resolved.set(id, {
           path,
+          fingerprint: `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`,
           status: {
             state: "ready",
             source: "existing",
@@ -244,7 +274,13 @@ export class SubscriptionRuntimeManager {
     } catch {
       /* An absent/incomplete cache requires an explicit download. */
     }
-    this.#resolved.set(id, { status: { state: "missing" }, at: Date.now() });
+    this.#resolved.set(id, {
+      status: {
+        state: "missing",
+        ...(detectedIssue ? { error: detectedIssue } : {}),
+      },
+      at: Date.now(),
+    });
     return undefined;
   }
   #directory(id: SubscriptionRuntimeId, spec: RuntimeManifest) {

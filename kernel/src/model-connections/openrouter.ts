@@ -12,12 +12,14 @@ import {
   type RetryOptions,
   withRetry,
 } from "../failures.ts";
+import { protectGoogleInferenceBody } from "../google-data-policy.ts";
 import type { ImageGenerationProviderUsage } from "../image-generation.ts";
 import {
   type ProviderToolBindings,
   webFetchProviderToolCapability,
   webSearchProviderToolCapability,
 } from "../provider-tools.ts";
+import { ToolPolicyError } from "../tools.ts";
 import { type FetchApi, MissingCredentialError } from "./openai.ts";
 
 export const openRouterApiKeyCreationUrl =
@@ -65,6 +67,10 @@ export interface OpenRouterImageRuntime {
 }
 
 export interface OpenRouterModelConnectionOptions {
+  readonly onGoogleDataRequest?: (route: {
+    readonly modelId: string;
+    readonly endpoint: string;
+  }) => void;
   readonly fetch?: FetchApi;
   readonly retry?: RetryOptions;
 }
@@ -82,6 +88,7 @@ export interface OpenRouterConnectionTestResult {
 
 export class OpenRouterModelConnection {
   readonly #fetch: FetchApi;
+  readonly #onGoogleDataRequest: OpenRouterModelConnectionOptions["onGoogleDataRequest"];
   readonly #retry: RetryOptions | undefined;
 
   constructor(
@@ -90,6 +97,56 @@ export class OpenRouterModelConnection {
   ) {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#retry = options.retry;
+    this.#onGoogleDataRequest = options.onGoogleDataRequest;
+  }
+
+  #zdrInventory:
+    | { expires: number; models: readonly string[] | undefined }
+    | undefined;
+  #zdrLoading: Promise<readonly string[] | undefined> | undefined;
+
+  /** Advisory only: final inference routing always enforces ZDR independently. */
+  async zdrModelIds(): Promise<readonly string[] | undefined> {
+    if (this.#zdrInventory && this.#zdrInventory.expires > Date.now())
+      return this.#zdrInventory.models;
+    if (this.#zdrLoading) return this.#zdrLoading;
+    this.#zdrLoading = (async () => {
+      let models: readonly string[] | undefined;
+      try {
+        const response = await this.#fetch(
+          "https://openrouter.ai/api/v1/endpoints/zdr",
+          { signal: AbortSignal.timeout(5000) },
+        );
+        if (!response.ok) throw new Error("ZDR inventory unavailable");
+        const payload = (await response.json()) as {
+          data?: { model_id?: unknown }[];
+        };
+        if (
+          !Array.isArray(payload.data) ||
+          payload.data.some(
+            (endpoint) => typeof endpoint?.model_id !== "string",
+          )
+        )
+          throw new Error("Invalid ZDR inventory");
+        models = [
+          ...new Set(
+            payload.data.map((endpoint) => endpoint.model_id as string),
+          ),
+        ];
+      } catch {
+        /* Unknown availability must never disable request enforcement. */
+      }
+      this.#zdrInventory = {
+        models,
+        expires: Date.now() + (models ? 300_000 : 30_000),
+      };
+      return models;
+    })();
+    try {
+      return await this.#zdrLoading;
+    } finally {
+      this.#zdrLoading = undefined;
+    }
   }
 
   async connect(
@@ -120,8 +177,10 @@ export class OpenRouterModelConnection {
   async loadModel(
     credentialRef: string,
     modelId = defaultOpenRouterModelId,
+    googleData: boolean | (() => boolean) = false,
   ): Promise<ReturnType<OpenRouterProvider["chat"]>> {
-    return (await this.loadAgentRuntime(credentialRef, modelId)).model;
+    return (await this.loadAgentRuntime(credentialRef, modelId, googleData))
+      .model;
   }
 
   async loadImageModel(
@@ -157,6 +216,7 @@ export class OpenRouterModelConnection {
   async loadAgentRuntime(
     credentialRef: string,
     modelId = defaultOpenRouterModelId,
+    googleData: boolean | (() => boolean) = false,
   ): Promise<OpenRouterAgentRuntime> {
     const apiKey = await this.credentials.get(credentialRef);
     if (!apiKey) {
@@ -165,12 +225,35 @@ export class OpenRouterModelConnection {
       );
     }
 
+    const protectedRequest = () =>
+      typeof googleData === "function" ? googleData() : googleData;
+    const inferenceFetch: FetchApi = async (input, init) => {
+      if (!protectedRequest()) return this.#fetch(input, init);
+      if (
+        String(input) !== "https://openrouter.ai/api/v1/chat/completions" ||
+        typeof init?.body !== "string"
+      ) {
+        throw new ToolPolicyError("Unsupported Google-data inference request");
+      }
+      const body = protectGoogleInferenceBody(init.body);
+      this.#onGoogleDataRequest?.({
+        modelId,
+        endpoint: "https://openrouter.ai/api/v1/chat/completions",
+      });
+      const response = await this.#fetch(input, { ...init, body });
+      if (response.status === 404 || response.status === 503) {
+        throw new ToolPolicyError(
+          `This OpenRouter model can’t currently be used with your Google data. To meet Google’s data-use policies, choose a different model marked “ZDR available,” then try again.`,
+        );
+      }
+      return response;
+    };
     const usage = new OpenRouterProviderUsage();
     const provider = createOpenRouter({
       apiKey,
       appName: "Springroll",
       compatibility: "strict",
-      fetch: createUsageTrackingFetch(this.#fetch, usage),
+      fetch: createUsageTrackingFetch(inferenceFetch, usage),
     });
 
     return {
@@ -179,16 +262,18 @@ export class OpenRouterModelConnection {
           include: true,
         },
       }),
-      providerTools: {
-        [webSearchProviderToolCapability]: {
-          profile: "managed-auto",
-          tool: provider.tools.webSearch({ engine: "auto" }),
-        },
-        [webFetchProviderToolCapability]: {
-          profile: "managed-auto",
-          tool: openRouterWebFetch({}),
-        },
-      },
+      providerTools: protectedRequest()
+        ? {}
+        : {
+            [webSearchProviderToolCapability]: {
+              profile: "managed-auto",
+              tool: provider.tools.webSearch({ engine: "auto" }),
+            },
+            [webFetchProviderToolCapability]: {
+              profile: "managed-auto",
+              tool: openRouterWebFetch({}),
+            },
+          },
       providerUsage: usage,
     };
   }

@@ -253,6 +253,13 @@
       "when": 1789570800000,
       "tag": "0035_google-data-protection",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1789670000000,
+      "tag": "0036_google-provider-eligibility",
+      "breakpoints": true
     }
   ]
 }

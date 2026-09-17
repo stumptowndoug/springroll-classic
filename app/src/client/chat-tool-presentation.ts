@@ -514,6 +514,14 @@ export function chatToolResultSummary(part: {
   }
   const output = part.output;
   if (output === undefined || output === null) return undefined;
+  const record = asRecord(output);
+  const notice = asRecord(
+    (asRecord(record?.structuredContent) ?? record)?.googleDataAccess,
+  );
+  if (notice?.status === "unavailable" && typeof notice.message === "string") {
+    return { text: clamp(notice.message, 240), tone: "danger" };
+  }
+
   const text = summarizeToolOutput(output);
   return text ? { text, tone: "neutral" } : undefined;
 }

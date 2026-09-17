@@ -3,14 +3,8 @@ CREATE TABLE `google_data_protection` (
   `created_at` integer NOT NULL
 );
 --> statement-breakpoint
--- Legacy content has no provenance. Conservatively protect existing local work
--- including content whose original Google account has already been removed.
-INSERT INTO `google_data_protection` (`id`, `created_at`)
-SELECT 'chat:' || id, updated_at FROM chat_sessions;
---> statement-breakpoint
-INSERT INTO `google_data_protection` (`id`, `created_at`)
-SELECT 'task:' || id, updated_at FROM tasks;
---> statement-breakpoint
+-- Protection is recorded by Google access and explicit derived-content flows.
+-- Existing recipes/chats are not evidence of Google access. Do not backfill them.
 CREATE TABLE `google_data_route_audit` (
   `id` text PRIMARY KEY NOT NULL,
   `model_id` text NOT NULL,

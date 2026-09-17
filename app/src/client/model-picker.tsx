@@ -36,7 +36,7 @@ export function ModelPicker({
   const [providerFilter, setProviderFilter] = useState<ModelProviderId | "all">(
     "all",
   );
-  const [availabilityFilter, setAvailabilityFilter] = useState("all");
+  const [zdrOnly, setZdrOnly] = useState(false);
   const [active, setActive] = useState(0);
   const unavailable = (model: ModelOptionDto | undefined) =>
     googleDataProtected &&
@@ -72,28 +72,20 @@ export function ModelPicker({
   const providers = modelProviders(models);
   const filteredModels = models.filter(
     (model) =>
-      availabilityFilter === "all" ||
-      model.googleDataCompatibility === availabilityFilter,
+      !zdrOnly ||
+      model.providerId !== "openrouter" ||
+      model.googleDataCompatibility === "available",
   );
   const providerModels =
     providerFilter === "all"
       ? filteredModels
       : filteredModels.filter((model) => model.providerId === providerFilter);
-  const visibleModels = normalizedQuery
-    ? providerModels.filter(
-        (model) =>
-          model.name.toLowerCase().includes(normalizedQuery) ||
-          model.modelId.toLowerCase().includes(normalizedQuery) ||
-          providerName(model.providerId)
-            .toLowerCase()
-            .includes(normalizedQuery),
-      )
-    : providerModels;
+  const visibleModels = providerModels.filter((model) =>
+    modelMatchesSearch(model, query),
+  );
   const grouped = groupModels(visibleModels);
   const showInherit =
-    normalizedQuery === "" &&
-    providerFilter === "all" &&
-    availabilityFilter === "all";
+    normalizedQuery === "" && providerFilter === "all" && !zdrOnly;
   const optionCount = visibleModels.length + (showInherit ? 1 : 0);
   const flatIndexByModel = new Map(
     visibleModels.map((model, index) => [
@@ -166,7 +158,7 @@ export function ModelPicker({
         onClick={() => {
           setQuery("");
           setProviderFilter("all");
-          setAvailabilityFilter("all");
+          setZdrOnly(false);
           setActive(0);
           setOpen((wasOpen) => !wasOpen);
         }}
@@ -228,35 +220,23 @@ export function ModelPicker({
                 />
               </div>
             ) : null}
-            {googleDataProtected ? (
+            {providers.includes("openrouter") ? (
               <div className="combo-provider-filter">
-                <span>
-                  {providerFilter === "openrouter"
-                    ? "ZDR routing"
-                    : "Google data"}
-                </span>
-                <SettingsPicker
-                  className="model-filter-picker"
-                  label="Filter models by Google data compatibility"
-                  disabled={false}
-                  value={availabilityFilter}
-                  options={[
-                    { value: "all", label: "All models" },
-                    {
-                      value: "available",
-                      label:
-                        providerFilter === "openrouter"
-                          ? "ZDR available"
-                          : "Compatible models",
-                    },
-                    { value: "unavailable", label: "Unavailable" },
-                    { value: "unknown", label: "Availability unknown" },
-                  ]}
-                  onChange={(value) => {
-                    setAvailabilityFilter(value);
+                <span>Zero Data Retention</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Zero Data Retention"
+                  aria-checked={zdrOnly}
+                  title="Filter OpenRouter models to Zero Data Retention endpoints; other providers remain visible"
+                  className="model-zdr-toggle"
+                  onClick={() => {
+                    setZdrOnly((enabled) => !enabled);
                     setActive(0);
                   }}
-                />
+                >
+                  <span aria-hidden="true" />
+                </button>
               </div>
             ) : null}
             <div className="combo-search">
@@ -332,10 +312,13 @@ export function ModelPicker({
                           ✓
                         </span>
                         <span className="combo-name">{model.name}</span>
-                        {googleDataProtected ? (
+                        {googleDataProtected ||
+                        model.providerId === "openrouter" ? (
                           <span className="combo-facts">
                             {model.googleDataCompatibility === "available"
-                              ? "ZDR available"
+                              ? model.providerId === "openrouter"
+                                ? "ZDR available"
+                                : "Direct API"
                               : model.googleDataCompatibility === "unavailable"
                                 ? model.providerId === "openrouter"
                                   ? "No ZDR endpoint"
@@ -357,6 +340,25 @@ export function ModelPicker({
       ) : null}
     </div>
   );
+}
+
+/** Match all search words across the label, ID, and provider, ignoring punctuation. */
+export function modelMatchesSearch(
+  model: Pick<ModelOptionDto, "name" | "modelId" | "providerId">,
+  query: string,
+): boolean {
+  const compact = (text: string) =>
+    text.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const fields = [
+    model.name,
+    model.modelId,
+    providerName(model.providerId),
+  ].map(compact);
+  return query
+    .trim()
+    .split(/\s+/)
+    .map(compact)
+    .every((word) => fields.some((field) => field.includes(word)));
 }
 
 export function compactInheritedModelLabel(label: string): string {

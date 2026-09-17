@@ -93,7 +93,7 @@ await notarizeArchive(zip, resultPath);
 await run(["xcrun", "stapler", "staple", app]);
 await run(["xcrun", "stapler", "validate", app]);
 await run(["spctl", "--assess", "--type", "execute", "--verbose=2", app]);
-const download = join(dirname(app), `Springroll-0.1.4-${process.arch}.zip`);
+const download = join(dirname(app), `Springroll-0.1.5-${process.arch}.zip`);
 await run(["ditto", "-c", "-k", "--keepParent", app, download]);
 console.log(`Signed and notarized beta: ${download}`);
 

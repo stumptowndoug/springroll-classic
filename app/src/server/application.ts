@@ -157,6 +157,7 @@ import {
   assertGoogleConnectionAccess,
   currentGoogleDataAccess,
   GoogleDataProtection,
+  isGoogleApiManifest,
   isGoogleConnection,
 } from "./google-data-protection.ts";
 import type {
@@ -353,6 +354,9 @@ export interface AssistantConnectionToolSummary {
 }
 
 export interface AssistantConnectionToolDescription {
+  readonly totalMatches?: number;
+  readonly truncated?: boolean;
+  readonly googleDataAccess?: AssistantConnectionToolSearchResult["googleDataAccess"];
   readonly connectionId: string;
   readonly connectionName: string;
   readonly tools: readonly AssistantConnectionToolSummary[];
@@ -367,6 +371,12 @@ export interface AssistantConnectionToolActivation {
 }
 
 export interface AssistantConnectionToolSearchResult {
+  readonly totalMatches?: number;
+  readonly truncated?: boolean;
+  readonly googleDataAccess?: {
+    readonly status: "unavailable";
+    readonly message: string;
+  };
   readonly query: string;
   readonly searchedConnections: number;
   readonly unavailableConnections: number;
@@ -691,6 +701,38 @@ export class LocalApplication {
     return this.#sources.get(sourceId);
   }
 
+  private async googleDiscoveryNotice(usesGoogle: boolean): Promise<{
+    googleDataAccess?: NonNullable<
+      AssistantConnectionToolSearchResult["googleDataAccess"]
+    >;
+  }> {
+    const scope = currentGoogleDataAccess();
+    let googleDataAccess: AssistantConnectionToolSearchResult["googleDataAccess"];
+    if (scope && usesGoogle) {
+      if (!scope.eligible)
+        googleDataAccess = {
+          status: "unavailable",
+          message:
+            scope.denialReason ??
+            "Choose an eligible model to access Google data.",
+        };
+      else if (
+        scope.provider === "openrouter" &&
+        scope.modelId &&
+        scope.modelId !== "openrouter/auto"
+      ) {
+        const zdrModels = await this.#models.zdrModelIds?.();
+        if (zdrModels && !zdrModels.includes(scope.modelId))
+          googleDataAccess = {
+            status: "unavailable",
+            message:
+              "Gmail, Calendar and Drive tools are available, but OpenRouter does not currently list a ZDR endpoint for the selected model. Choose another OpenRouter model marked ZDR available, or an eligible direct API account, then retry. Do not describe this as a missing email tool.",
+          };
+      }
+    }
+    return googleDataAccess ? { googleDataAccess } : {};
+  }
+
   async describeConnectionTools(
     connectionReference: string,
     query?: string,
@@ -738,6 +780,16 @@ export class LocalApplication {
       return {
         connectionId: selected.connection.id,
         connectionName: selected.name,
+        totalMatches: matchingDescriptors.length,
+        truncated: matchingDescriptors.length > boundedLimit,
+        ...(await this.googleDiscoveryNotice(
+          isGoogleConnection(selected.connection) ||
+            isGoogleApiManifest(
+              selected.connection.manifestId
+                ? this.connectorManifest(selected.connection.manifestId)
+                : undefined,
+            ),
+        )),
         tools: matchingDescriptors
           .slice(0, boundedLimit)
           .map((descriptor) =>
@@ -771,6 +823,7 @@ export class LocalApplication {
         readonly score: number;
       }
     > = [];
+    const googleConnectionIds = new Set<string>();
     let searchedConnections = 0;
     let unavailableConnections = 0;
     const unavailableConnectionIds: string[] = [];
@@ -778,6 +831,13 @@ export class LocalApplication {
     for (const row of connectedRows.slice(0, 100)) {
       try {
         const selected = this.assistantConnection(row.id);
+        if (
+          isGoogleConnection(selected.connection) ||
+          isGoogleApiManifest(
+            row.manifestId ? this.connectorManifest(row.manifestId) : undefined,
+          )
+        )
+          googleConnectionIds.add(selected.connection.id);
         const stored = this.storedConnectionToolDescriptors(
           selected.connection,
         );
@@ -826,6 +886,11 @@ export class LocalApplication {
 
     return {
       query: query.trim(),
+      totalMatches: matches.length,
+      truncated: matches.length > boundedLimit,
+      ...(await this.googleDiscoveryNotice(
+        matches.some((match) => googleConnectionIds.has(match.connectionId)),
+      )),
       searchedConnections,
       unavailableConnections,
       ...(unavailableConnectionIds.length
@@ -835,6 +900,9 @@ export class LocalApplication {
         .sort(
           (left, right) =>
             right.score - left.score ||
+            Number(right.effect === "read") - Number(left.effect === "read") ||
+            Number(/^(search|list)_/.test(right.toolName)) -
+              Number(/^(search|list)_/.test(left.toolName)) ||
             left.connectionName.localeCompare(right.connectionName) ||
             left.toolName.localeCompare(right.toolName),
         )
@@ -3519,7 +3587,9 @@ export class LocalApplication {
       ...model,
       googleDataCompatibility:
         model.providerId !== "openrouter"
-          ? "unavailable"
+          ? new GoogleDataProtection(this.db).eligible(model.providerId)
+            ? "available"
+            : "unavailable"
           : zdrModels === undefined || model.modelId === "openrouter/auto"
             ? "unknown"
             : zdrModels.includes(model.modelId)
@@ -3527,7 +3597,9 @@ export class LocalApplication {
               : "unavailable",
       googleDataReason:
         model.providerId !== "openrouter"
-          ? "Google-data access is not enabled for this provider yet."
+          ? new GoogleDataProtection(this.db).eligible(model.providerId)
+            ? "Direct API route. Use an account with no-training terms and training opt-ins disabled; Gemini requires a billing-enabled project. Standard retention may apply."
+            : new GoogleDataProtection(this.db).denialReason(model.providerId)
           : zdrModels === undefined || model.modelId === "openrouter/auto"
             ? "ZDR availability checked when running; ZDR stays enforced."
             : zdrModels.includes(model.modelId)

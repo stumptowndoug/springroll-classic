@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   type Connection,
   type ConnectorManifest,
+  OpenRouterModelConnection,
   openLocalDatabase,
   publicFailureMessage,
 } from "@springroll/kernel";
@@ -60,11 +61,11 @@ describe("Google data isolation", () => {
     const { policy } = setup();
     policy.mark("chat:google");
     try {
-      policy.scope("chat:google", "openai", "gpt");
+      policy.scope("chat:google", "codex", "gpt");
       throw new Error("Expected rejection");
     } catch (error) {
       expect(publicFailureMessage(error)).toContain(
-        "Select an OpenRouter model with enforced ZDR",
+        "Subscription connections are not enabled",
       );
     }
   });
@@ -72,12 +73,12 @@ describe("Google data isolation", () => {
   test("blocks Google access from other providers and unauthenticated tool paths", () => {
     const { policy } = setup();
     expect(() => assertGoogleConnectionAccess(google)).toThrow(
-      "OpenRouter model with enforced ZDR",
+      "Select an eligible model",
     );
-    const scope = policy.scope("chat:other", "openai", "gpt-5.4-mini");
+    const scope = policy.scope("chat:other", "codex", "gpt-5.4-mini");
     expect(() =>
       withGoogleDataAccess(scope, () => assertGoogleConnectionAccess(google)),
-    ).toThrow("OpenRouter model with enforced ZDR");
+    ).toThrow("Subscription connections are not enabled");
     expect(policy.has("chat:other")).toBe(false);
   });
   test("protects before Google results arrive, persists across policy reload, and blocks model switching", () => {
@@ -137,33 +138,228 @@ describe("Google data isolation", () => {
     ).resolves.toEqual({});
     expect(calls).toEqual(["create_task", "search_web", "research_connection"]);
   });
-  test("does not return derived local history to an unrestricted model", async () => {
+  test("blocks protected records, but not unrelated records or connection discovery", async () => {
     const { policy } = setup();
     policy.mark("task:protected");
-    let executed = false;
+    const calls: string[] = [];
     const registry: ApplicationToolRegistry = {
       definitions: [],
       get: () => undefined,
-      execute: async () => {
-        executed = true;
-        return "private";
+      execute: async (name) => {
+        calls.push(name);
+        return name === "list_tasks"
+          ? { tasks: [{ id: "protected", prompt: "private" }] }
+          : { id: "unrelated", text: "public" };
       },
     };
-    const guarded = policy.registry(
-      registry,
-      policy.scope("chat:other", "openai", "gpt"),
-    );
+    const scope = policy.scope("chat:other", "codex", "gpt");
+    const guarded = policy.registry(registry, scope);
+    await expect(
+      guarded.execute("get_task", { taskId: "protected" }, { callId: "read" }),
+    ).rejects.toThrow("Subscription connections are not enabled");
+    expect(calls).toEqual([]);
+    const listed = await guarded.execute("list_tasks", {}, { callId: "list" });
+    expect(JSON.stringify(listed)).not.toContain("private");
+    expect(listed).toMatchObject({
+      tasks: [{ id: "protected", googleDataProtected: true }],
+    });
     for (const name of [
-      "get_run",
-      "list_tasks",
       "get_task",
-      "update_task",
       "list_connections",
+      "search_connection_tools",
+      "create_task",
     ]) {
       await expect(
-        guarded.execute(name, {}, { callId: "read" }),
-      ).rejects.toThrow("OpenRouter model with enforced ZDR");
+        guarded.execute(name, { taskId: "unrelated" }, { callId: "other" }),
+      ).resolves.toBeDefined();
     }
-    expect(executed).toBe(false);
+    expect(scope.protected).toBe(false);
+    expect(policy.has("chat:other")).toBe(false);
   });
+  test("omits protected inventory contents without tainting unrelated recipe creation", async () => {
+    const { policy } = setup();
+    policy.mark("task:protected");
+    const scope = policy.scope("chat:inventory", "openrouter", model);
+    const registry: ApplicationToolRegistry = {
+      definitions: [],
+      get: () => undefined,
+      execute: async () => ({
+        tasks: [{ id: "protected", prompt: "private" }],
+      }),
+    };
+    const result = await policy
+      .registry(registry, scope)
+      .execute("list_tasks", {}, { callId: "list" });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(scope.protected).toBe(false);
+    expect(policy.has("chat:inventory")).toBe(false);
+  });
+});
+
+test("day-in-history discovery stays unrestricted, then explicit protected detail enables ZDR", async () => {
+  const { policy } = setup();
+  policy.mark("task:legacy");
+  const scope = policy.scope(
+    "chat:history",
+    "openrouter",
+    "qwen/qwen3.8-flash",
+  );
+  const bodies: { provider?: { zdr?: boolean } }[] = [];
+  const connection = new OpenRouterModelConnection(
+    { get: async () => "test", put: async () => {}, delete: async () => {} },
+    {
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          id: "test",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "OK" },
+              finish_reason: "stop",
+            },
+          ],
+        });
+      },
+    },
+  );
+  const model = await connection.loadModel(
+    "test",
+    "qwen/qwen3.8-flash",
+    () => scope.protected,
+  );
+  const next = () =>
+    model.doGenerate({
+      prompt: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Create a day-in-history recipe" }],
+        },
+      ],
+    });
+  const registry: ApplicationToolRegistry = {
+    definitions: [],
+    get: () => undefined,
+    execute: async (name) =>
+      name === "list_tasks"
+        ? { tasks: [{ id: "legacy", prompt: "protected contents" }] }
+        : name === "get_task"
+          ? { task: { id: "legacy", prompt: "protected contents" } }
+          : { connections: [] },
+  };
+  const guarded = policy.registry(registry, scope);
+  await next();
+  for (const name of [
+    "list_connections",
+    "get_application_state",
+    "list_connections",
+    "list_tasks",
+  ]) {
+    const result = await guarded.execute(name, {}, { callId: name });
+    expect(JSON.stringify(result)).not.toContain("protected contents");
+  }
+  await next();
+  expect(bodies[0]?.provider?.zdr).toBeUndefined();
+  expect(bodies[1]?.provider?.zdr).toBeUndefined();
+  expect(policy.has("chat:history")).toBe(false);
+  await guarded.execute("get_task", { taskId: "legacy" }, { callId: "detail" });
+  await next();
+  expect(bodies[2]?.provider?.zdr).toBe(true);
+  expect(policy.has("chat:history")).toBe(true);
+});
+
+test("actual Google access refreshes a legacy marker so it cannot be mistaken for migration-only state", () => {
+  const { db, policy } = setup();
+  db.sqlite.run(
+    "INSERT INTO google_data_protection (id, created_at) VALUES (?, ?)",
+    ["task:legacy", 1],
+  );
+  const scope = policy.scope("task:legacy", "openrouter", model);
+  withGoogleDataAccess(scope, () => assertGoogleConnectionAccess(google));
+  const marker = db.sqlite
+    .query<{ created_at: number }, []>(
+      "SELECT created_at FROM google_data_protection WHERE id = 'task:legacy'",
+    )
+    .get();
+  expect(marker?.created_at).toBeGreaterThan(1);
+  expect(scope.protected).toBe(true);
+});
+
+test("a repaired non-Google recipe stays unprotected despite other Google recipes", () => {
+  const { db, policy } = setup();
+  policy.mark("task:google-recipe");
+  db.sqlite.run(
+    "INSERT INTO google_data_protection (id, created_at) VALUES (?, ?)",
+    ["task:neon-report", 1],
+  );
+  // An audited repair removes only the migration's mistaken marker.
+  db.sqlite.run("DELETE FROM google_data_protection WHERE id = ?", [
+    "task:neon-report",
+  ]);
+  const reopened = new GoogleDataProtection(db.db);
+  const scope = reopened.scope(
+    "task:neon-report",
+    "openrouter",
+    "qwen/qwen3.8-flash",
+  );
+  withGoogleDataAccess(scope, () =>
+    assertGoogleConnectionAccess({
+      ...external,
+      id: "neon",
+      manifestId: "neon",
+    }),
+  );
+  expect(scope.protected).toBe(false);
+  expect(reopened.has("task:neon-report")).toBe(false);
+  expect(reopened.has("task:google-recipe")).toBe(true);
+  // Google access later in that same scope must still enable protection.
+  withGoogleDataAccess(scope, () => assertGoogleConnectionAccess(google));
+  expect(scope.protected).toBe(true);
+  expect(reopened.has("task:neon-report")).toBe(true);
+});
+
+test("Gemini reads Gmail without a manual confirmation and retains protection across model switches", async () => {
+  const { db, policy } = setup();
+  const scope = policy.scope("chat:gemini", "google", "gemini-3.7-flash");
+  let reads = 0;
+  const registry = policy.registry(
+    {
+      definitions: [],
+      get: () => undefined,
+      execute: async () => {
+        assertGoogleConnectionAccess(google);
+        reads++;
+        return { subject: "synthetic" };
+      },
+    },
+    scope,
+  );
+  await expect(
+    registry.execute("gmail_search_threads", {}, { callId: "read" }),
+  ).resolves.toEqual({ subject: "synthetic" });
+  expect(reads).toBe(1);
+  expect(scope.protected).toBe(true);
+  expect(
+    new GoogleDataProtection(db.db).scope(
+      "chat:gemini",
+      "google",
+      "gemini-3.7-flash",
+    ).protected,
+  ).toBe(true);
+  expect(policy.scope("chat:gemini", "openrouter", model).protected).toBe(true);
+});
+
+test("direct API eligibility does not depend on legacy confirmation rows; subscriptions remain blocked", () => {
+  const { policy } = setup();
+  for (const id of [
+    "openai",
+    "anthropic",
+    "google",
+    "xai",
+    "groq",
+    "openrouter",
+  ])
+    expect(policy.eligible(id)).toBe(true);
+  for (const id of ["claude", "codex", "unknown"])
+    expect(policy.eligible(id)).toBe(false);
 });

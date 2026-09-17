@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   type AgentRunner,
   AiSdkAssistant,
@@ -53,6 +53,10 @@ import {
   chatExecutionLimits,
   readRecipeExecutionLimits,
 } from "../src/server/execution-settings.ts";
+import {
+  GoogleDataProtection,
+  withGoogleDataAccess,
+} from "../src/server/google-data-protection.ts";
 import { type AssistantApi, createHttpApp } from "../src/server/http-app.ts";
 import type {
   IntegrationResearcher,
@@ -7241,4 +7245,99 @@ test("runtime setup endpoints require explicit local requests and reject unknown
     ).status,
   ).toBe(200);
   expect(calls).toEqual(["status:codex", "install:claude", "cancel:claude"]);
+});
+
+test("Gmail discovery surfaces latest-message search and explains unavailable ZDR models without tainting discovery", async () => {
+  const { application, database } = createHarness();
+  database.db
+    .insert(connectionTable)
+    .values({
+      id: "gmail-default",
+      name: "Gmail",
+      sourceId: "http-api",
+      manifestId: "gmail",
+      credentialRef: "test-google",
+      availableIn: ["local"],
+      config: { grantedPermissionSets: ["read", "send", "drafts"] },
+    })
+    .run();
+  const policy = new GoogleDataProtection(database.db);
+  const scope = policy.scope(
+    "chat:gmail-discovery",
+    "openrouter",
+    "qwen/qwen3-8b",
+  );
+  const inventory = spyOn(
+    OpenRouterModelConnection.prototype,
+    "zdrModelIds",
+  ).mockResolvedValue(["eligible/model"]);
+  try {
+    for (const query of [
+      "gmail",
+      "message",
+      "messages",
+      "list",
+      "latest gmail message",
+    ]) {
+      const result = await withGoogleDataAccess(scope, () =>
+        application.searchConnectionTools(query, 5),
+      );
+      expect(
+        result.matches.some((tool) => tool.toolName === "search_threads"),
+      ).toBe(true);
+      expect(result.googleDataAccess?.message).toContain("ZDR endpoint");
+      expect(result.googleDataAccess?.message).toContain(
+        "not describe this as a missing email tool",
+      );
+    }
+    const result = await withGoogleDataAccess(scope, () =>
+      application.describeConnectionTools("gmail-default", "message", 5),
+    );
+    expect(result.tools.some((tool) => tool.name === "search_threads")).toBe(
+      true,
+    );
+    expect(result.googleDataAccess?.status).toBe("unavailable");
+    const partial = await application.searchConnectionTools("gmail", 1);
+    expect(partial.truncated).toBe(true);
+    expect(partial.totalMatches).toBeGreaterThan(1);
+    inventory.mockResolvedValue(undefined);
+    expect(
+      (
+        await withGoogleDataAccess(scope, () =>
+          application.searchConnectionTools("gmail"),
+        )
+      ).googleDataAccess,
+    ).toBeUndefined();
+    inventory.mockResolvedValue(["qwen/qwen3-8b"]);
+    expect(
+      (
+        await withGoogleDataAccess(scope, () =>
+          application.describeConnectionTools("gmail-default"),
+        )
+      ).googleDataAccess,
+    ).toBeUndefined();
+    const gemini = policy.scope(
+      "chat:gemini-discovery",
+      "google",
+      "gemini-3.7-flash",
+    );
+    expect(
+      (
+        await withGoogleDataAccess(gemini, () =>
+          application.searchConnectionTools("gmail"),
+        )
+      ).googleDataAccess,
+    ).toBeUndefined();
+    expect(policy.has("chat:gmail-discovery")).toBe(false);
+    expect(scope.protected).toBe(false);
+    expect(
+      (
+        await withGoogleDataAccess(scope, () =>
+          application.searchConnectionTools("hacker news"),
+        )
+      ).googleDataAccess,
+    ).toBeUndefined();
+  } finally {
+    inventory.mockRestore();
+  }
 });

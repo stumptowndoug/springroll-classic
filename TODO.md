@@ -15,6 +15,10 @@ Earlier backlog, partial work, and completed history are preserved in [the Septe
 
 ## 📋 Backlog
 
+- [ ] Replace precautionary legacy Google-data markers with provenance-backed classification
+  - Deferred prototype-only cleanup: the earlier development migration marked all existing chats/recipes. The customer-upgrade backfill has been removed; the user requested leaving current test recipes alone.
+
+
 - [ ] Investigate intermittent Rivet recovery test timeouts in CI
   - v0.1.2 merged-main CI initially timed out in downtime coalescing and pre-versioned state migration; both passed locally and the full CI rerun passed without code changes.
 
@@ -61,6 +65,27 @@ Earlier backlog, partial work, and completed history are preserved in [the Septe
 
 
 ## 🚧 In Progress
+
+- [ ] Publish v0.1.5 Google data routing beta
+  - [ ] Commit, pass checks, merge PR, sign/notarize artifacts, publish release and update website.
+
+- [ ] Upload verification recordings and resubmit Google OAuth review
+  - [x] User uploaded both videos as unlisted; verified URLs and prepared reply plus evidence ZIP in Downloads/Springroll-Google-Verification.
+  - [ ] Send prepared reply with evidence ZIP in existing Google thread; browser actions unavailable. Cloud Console demo links not updated.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -170,6 +195,59 @@ Earlier backlog, partial work, and completed history are preserved in [the Septe
   - Policy and acceptance handoff: [docs/missed-run-policy.md](docs/missed-run-policy.md). Keep this card open until device acceptance; do not silently treat simulated downtime as Mac sleep verification.
 
 ## ✅ Done
+
+- [x] Remove the manual direct-provider confirmation gate
+  - Direct API routes no longer require an attestation checkbox; Gemini billing/no-training requirements remain guidance and are not automatically verified. OpenRouter ZDR stays enforced. Removed unused UI/API handlers; legacy schema column retained for existing DB compatibility. 125 focused tests/typecheck passed; prototype rebuilt; privacy/evidence text corrected.
+
+- [x] Fix truncated Gmail discovery and show model compatibility notices
+  - Gmail search_threads now matches message/messages/list/latest-email queries; broad search ranks read/discovery tools ahead of writes and reports truncation. Search/describe return advisory Google-model availability without marking unrelated work protected. Work-log summaries show the host notice. 126 focused tests and typecheck passed; prototype rebuilt.
+
+- [x] Enable Google-data access for confirmed no-training direct API accounts
+  - Shared runtime/catalog eligibility allows confirmed OpenAI, Anthropic, xAI, Groq, and billing-enabled Gemini API accounts. Added per-account UI/API confirmation, persisted timestamp, and reset on key replacement/disconnection. 773 tests and typecheck passed; prototype reopened; privacy page updated. Owner must truthfully confirm their account before direct Google-data access; no billing status was assumed.
+
+- [x] Clarify user-owned OpenRouter keys in the verification packet
+  - Removed developer-account settings as an application-wide evidence requirement; retained the distinction between enforced request controls, demo-route evidence, and unresolved account exceptions.
+
+- [x] Prepare Google privacy disclosures and verifiable OpenRouter routing evidence
+  - Published privacy/Limited Use disclosures; prepared dated 874-endpoint inventory, enforced-payload fixture, 19 passing checks and reviewer reply draft. Account settings and live downstream-route evidence remain pending owner confirmation/recording.
+
+- [x] Keep other providers visible when the ZDR filter is on
+  - Only OpenRouter entries are filtered by ZDR availability. Google-access enforcement remains separate and OpenRouter-only. Typecheck passed; prototype rebuilt and reopened.
+
+- [x] Polish ZDR toggle contrast and alignment
+  - Solid light thumb, opaque neutral off track, theme-accent on track, and equal 3px inset in both states. CSS checked and prototype rebuilt.
+
+- [x] Simplify the model filter to a Zero Data Retention toggle
+  - Replaced the availability dropdown with a labeled on/off switch. On shows known ZDR-capable models; off shows all. Filtering does not alter routing enforcement. Typecheck and prototype rebuild passed.
+
+- [x] Expose OpenRouter ZDR model filters and improve model search matching
+  - Shared model selector exposes the custom ZDR filter outside protected contexts and labels OpenRouter availability. Search matches words across names, IDs, and providers regardless of order or punctuation. Four tests, typecheck, and prototype rebuild passed.
+
+- [x] Repair and verify the running recipes’ persisted Google protection state
+  - Backed up and cleared reviewed false markers for GitHub Trending, API Usage, College Football, and their related chats. Other protected records preserved. Live GitHub retry 04c2b942 passed the Google gate but Qwen returned upstream HTTP 429 after three attempts; report completion remains unverified.
+
+- [x] Remove blanket Google protection from customer upgrades
+  - Unreleased migration 0035 now creates empty protection tables; existing customer recipes, models, and schedules are unchanged. Upgrade and scoped-routing regressions: 19 passed; typecheck passed. Existing prototype recipes left alone as requested.
+
+- [x] Repair the AssessorSearch recipe’s false legacy Google-data marker
+  - Reviewed its Neon tool history and creation context, backed up and removed its migration-only marker. Actual Google access now refreshes marker timestamps; 18 focused tests and typecheck passed. Broader historical classification remains in Backlog.
+
+- [x] Explain Google model-routing failures in clear user-facing language
+  - Routing errors explicitly name OpenRouter, explain Google data-use policies and tell users to choose a model marked “ZDR available.” Removed backend retry/failed-tool-trace jargon from the chat notice.
+  - Seven routing tests, typecheck and lint pass; rebuilt/reopened prototype.
+
+
+- [x] Stop protected recipe discovery from forcing unrelated chats into ZDR
+  - Traced the reported day-in-history failure to list_tasks returning precautionarily protected legacy recipes. Unprotected inventories now omit protected record contents; explicit detail access still activates protection.
+  - Backed up and sanitized the affected chat's incidental recipe-list output, then removed its erroneous marker after verifying it made only discovery calls. User prompt/history otherwise preserved; no model request or scheduled recipe executed.
+  - 85 focused tests pass, including the exact four-tool discovery sequence followed by explicit protected access; typecheck/lint and desktop build pass. Reopened prototype.
+
+
+- [x] Scope OpenRouter ZDR to Google-data requests instead of all chats and recipes
+  - Checkpoint committed first as e23c1cf. Per-request callbacks now evaluate each chat/recipe's own protection scope; Google access activates enforcement before the next inference, while unrelated work stays unrestricted.
+  - Local reads protect only referenced records and protected inventory results; connection discovery no longer triggers protection solely because Google exists elsewhere.
+  - 765 tests and four snapshots pass; lint/typecheck and prototype build pass. Reopened prototype. Existing legacy markers retained; provenance cleanup tracked separately.
+
 
 - [x] Remove unsupported version floors from installed subscription runtime discovery
   - Corrected the prior minimum-version assumption: pinned package versions describe managed downloads, not a tested compatibility floor. Installed Claude/Codex tools now use command capability checks only.

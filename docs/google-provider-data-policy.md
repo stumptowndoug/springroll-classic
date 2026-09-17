@@ -21,10 +21,12 @@ Gemini needs verified paid-service status (or a substantiated applicable excepti
 The API key alone does not establish account settings or paid-service status.
 Do not label these direct integrations “ZDR enforced” on that basis.
 
-This branch revision removes the OpenRouter whitelist. It does not yet expand
-Google-data eligibility to direct API accounts without an account-eligibility
-mechanism and evidence for Google's review. It does not treat ordinary retention
-as an automatic Google policy violation.
+September 17 implementation: direct OpenAI, Anthropic, xAI, Groq and Gemini API
+connections are supported without a manual confirmation gate. No-training
+terms/settings and a billing-enabled Gemini project remain documented requirements,
+but the app does not inspect or technically enforce account-level eligibility.
+This remains an explicit limitation for Google verification. Direct API routes
+are not described as ZDR. OpenRouter's per-request ZDR enforcement is unchanged.
 
 Sources:
 

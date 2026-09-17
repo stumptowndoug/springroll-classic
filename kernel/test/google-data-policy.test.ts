@@ -116,7 +116,7 @@ describe("Google inference boundary", () => {
           { role: "user", content: [{ type: "text", text: "private" }] },
         ],
       }),
-    ).rejects.toThrow("ZDR enforced");
+    ).rejects.toThrow("Google’s data-use policies");
     expect(bodies).toHaveLength(1);
     expect(bodies[0]?.provider).toEqual({ data_collection: "deny", zdr: true });
   });
@@ -152,4 +152,61 @@ describe("OpenRouter ZDR availability", () => {
       expect(await connection.zdrModelIds()).toBeUndefined();
     }
   });
+});
+
+test("enables ZDR on the same model immediately after Google access without affecting another chat", async () => {
+  let googleData = false;
+  const bodies: { provider?: { zdr?: boolean; data_collection?: string } }[] =
+    [];
+  let audited = 0;
+  const connection = new OpenRouterModelConnection(credentials, {
+    onGoogleDataRequest: () => {
+      audited++;
+    },
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({
+        id: "test",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "OK" },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+    },
+  });
+  const protectedChat = await connection.loadModel(
+    "key",
+    "example/model",
+    () => googleData,
+  );
+  const unrelatedChat = await connection.loadModel(
+    "key",
+    "example/model",
+    () => false,
+  );
+  const generate = (model: typeof protectedChat) =>
+    model.doGenerate({
+      prompt: [
+        { role: "user", content: [{ type: "text", text: "synthetic test" }] },
+      ],
+      providerOptions: { openrouter: { provider: { zdr: false } } },
+    });
+  await generate(protectedChat);
+  expect(bodies[0]?.provider?.zdr).toBe(false);
+  expect(audited).toBe(0);
+  googleData = true;
+  await generate(protectedChat);
+  await generate(protectedChat);
+  expect(bodies[1]?.provider).toMatchObject({
+    zdr: true,
+    data_collection: "deny",
+  });
+  expect(bodies[2]?.provider?.zdr).toBe(true);
+  await generate(unrelatedChat);
+  expect(bodies[3]?.provider?.zdr).toBe(false);
+  expect(audited).toBe(2);
 });

@@ -74,6 +74,9 @@ export const modelProviderConnections = sqliteTable(
     name: text("name").notNull(),
     catalogProviderId: text("catalog_provider_id").notNull(),
     credentialRef: text("credential_ref").notNull(),
+    googleDataConfirmedAt: integer("google_data_confirmed_at", {
+      mode: "timestamp_ms",
+    }),
     availableIn: text("available_in", { mode: "json" })
       .$type<ExecutionLocation[]>()
       .notNull(),

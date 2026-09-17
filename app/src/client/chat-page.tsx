@@ -770,9 +770,8 @@ export function ChatConversation({
                 <span>
                   {latestTurn.status === "cancelled"
                     ? "You can retry the same request whenever you're ready."
-                    : latestTurn.error
-                      ? `${latestTurn.error} Retry starts a clean model continuation without the failed tool trace.`
-                      : "Springroll could not complete it. Retry starts a clean model continuation."}
+                    : latestTurn.error ||
+                      "Something went wrong. Try your request again."}
                 </span>
               </div>
               <button

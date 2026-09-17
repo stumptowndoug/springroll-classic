@@ -2234,6 +2234,13 @@ function ModelProviderCard({
       footer={
         <>
           {footer}
+          {provider.kind === "direct_api" && provider.status === "connected" ? (
+            <p className="provider-google-data">
+              {provider.id === "google"
+                ? "For Gmail, Calendar and Drive, use a billing-enabled API project with training/data sharing disabled."
+                : "For Google data, use API terms that exclude model training and keep training/data-sharing opt-ins disabled."}
+            </p>
+          ) : null}
           {error && (!open || provider.kind === "subscription") ? (
             <p className="connect-panel-error" role="alert">
               {error}
@@ -3750,7 +3757,7 @@ function ConnectionDetailContent({
             <dt>AI data protection</dt>
             <dd>
               {connection.googleDataProtection?.enforced
-                ? "OpenRouter · Zero Data Retention enforced"
+                ? "Direct API providers · OpenRouter ZDR enforced"
                 : "ZDR protection not enabled"}
             </dd>
           </div>

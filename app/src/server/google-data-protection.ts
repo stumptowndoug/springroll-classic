@@ -3,17 +3,20 @@ import {
   type AppDatabase,
   type Connection,
   type ConnectorManifest,
-  connections,
   googleDataProtection,
+  runs,
   ToolPolicyError,
 } from "@springroll/kernel";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { ApplicationToolRegistry } from "./application-tool-registry.ts";
 
 const googleManifests = ["gmail", "google-calendar", "google-drive"];
 const access = new AsyncLocalStorage<GoogleDataAccess>();
 export interface GoogleDataAccess {
+  readonly provider?: string;
+  readonly modelId?: string;
   readonly eligible: boolean;
+  readonly denialReason?: string;
   protected: boolean;
   protect(): void;
 }
@@ -68,7 +71,8 @@ export function assertGoogleConnectionAccess(
   if (isGoogleConnection(connection) || isGoogleApiManifest(manifest)) {
     if (!scope?.eligible)
       throw new ToolPolicyError(
-        "Use an OpenRouter model with enforced ZDR to access Google data.",
+        scope?.denialReason ??
+          "Select an eligible model to access Google data.",
       );
     scope.protect();
   }
@@ -76,6 +80,21 @@ export function assertGoogleConnectionAccess(
 
 export class GoogleDataProtection {
   constructor(private readonly db: AppDatabase) {}
+
+  eligible(provider: string): boolean {
+    return [
+      "openrouter",
+      "openai",
+      "anthropic",
+      "google",
+      "xai",
+      "groq",
+    ].includes(provider);
+  }
+
+  denialReason(_provider: string): string {
+    return "Use a direct API provider or an OpenRouter model with ZDR available to access Google data. Subscription connections are not enabled for Google data.";
+  }
 
   has(id: string): boolean {
     return Boolean(
@@ -90,35 +109,78 @@ export class GoogleDataProtection {
     this.db
       .insert(googleDataProtection)
       .values({ id, createdAt: new Date() })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: googleDataProtection.id,
+        set: { createdAt: new Date() },
+      })
       .run();
   }
-  hasGoogleContent(): boolean {
-    return Boolean(
-      this.db.select().from(googleDataProtection).limit(1).get() ||
-        this.db
-          .select()
-          .from(connections)
-          .where(inArray(connections.manifestId, googleManifests))
-          .limit(1)
-          .get(),
+  private isProtectedReference(record: Record<string, unknown>): boolean {
+    for (const key of ["id", "taskId", "runId", "sessionId"]) {
+      const id = record[key];
+      if (typeof id !== "string") continue;
+      if (this.has(`task:${id}`) || this.has(`chat:${id}`)) return true;
+      const run = this.db
+        .select({ taskId: runs.taskId })
+        .from(runs)
+        .where(eq(runs.id, id))
+        .get();
+      if (run && this.has(`task:${run.taskId}`)) return true;
+    }
+    return false;
+  }
+  private containsProtectedReference(value: unknown): boolean {
+    if (!value || typeof value !== "object") return false;
+    if (Array.isArray(value))
+      return value.some((item) => this.containsProtectedReference(item));
+    const record = value as Record<string, unknown>;
+    return (
+      this.isProtectedReference(record) ||
+      Object.values(record).some((item) =>
+        this.containsProtectedReference(item),
+      )
+    );
+  }
+  /** Discovery must not pull unrelated Google-derived content into a conversation. */
+  discoveryResult(value: unknown): unknown {
+    if (!value || typeof value !== "object") return value;
+    if (Array.isArray(value))
+      return value.map((item) => this.discoveryResult(item));
+    const record = value as Record<string, unknown>;
+    if (this.isProtectedReference(record)) {
+      return {
+        ...Object.fromEntries(
+          ["id", "taskId", "runId", "sessionId"].flatMap((key) =>
+            typeof record[key] === "string" ? [[key, record[key]]] : [],
+          ),
+        ),
+        googleDataProtected: true,
+        details:
+          "Contents omitted during discovery. Open this record only if needed for the user's request; reading its contents requires a Google-compatible model.",
+      };
+    }
+    return Object.fromEntries(
+      Object.entries(record).map(([key, item]) => [
+        key,
+        this.discoveryResult(item),
+      ]),
     );
   }
   scope(id: string, provider: string, modelId: string): GoogleDataAccess {
-    const eligible = provider === "openrouter" && modelId.trim().length > 0;
+    const eligible = this.eligible(provider) && modelId.trim().length > 0;
     if (this.has(id) && !eligible) {
       throw new ToolPolicyError(
-        "This conversation or recipe contains Google data. Select an OpenRouter model with enforced ZDR to continue; changing providers cannot remove this protection.",
+        `This conversation or recipe contains Google data. ${this.denialReason(provider)}`,
       );
     }
     const scope: GoogleDataAccess = {
+      provider,
+      modelId,
       eligible,
+      denialReason: this.denialReason(provider),
       protected: this.has(id),
       protect: () => {
-        if (!eligible)
-          throw new ToolPolicyError(
-            "Use an OpenRouter model with enforced ZDR to read Google data or saved workspace content that may contain it.",
-          );
+        if (!eligible) throw new ToolPolicyError(this.denialReason(provider));
         this.mark(id);
         scope.protected = true;
       },
@@ -136,32 +198,24 @@ export class GoogleDataProtection {
       context,
     ) => {
       const args = input as Record<string, unknown>;
-      // Local inventories include names, summaries, prompts and derived content.
-      // Until individual fields have provenance, treat these reads conservatively.
+      // Only data from a protected record taints the conversation. Merely having
+      // a Google connection elsewhere in the workspace does not.
       const localContent = new Set([
-        "list_connections",
         "list_tasks",
         "get_task",
         "list_runs",
         "get_run",
         "list_approvals",
-        "get_usage",
         "get_application_state",
-        "search_connection_tools",
-        "describe_connection_tools",
-        "activate_connection_tools",
-        "create_task",
         "update_task",
         "repair_task_tools",
         "run_task_now",
         "pause_task",
         "resume_task",
         "delete_task",
-        "reconnect_connection",
-        "disconnect_connection",
-        "remove_connection",
       ]);
-      if (localContent.has(name) && this.hasGoogleContent()) scope.protect();
+      if (localContent.has(name) && this.containsProtectedReference(args))
+        scope.protect();
       if (
         scope.protected &&
         (name === "create_task" || name === "update_task")
@@ -171,9 +225,24 @@ export class GoogleDataProtection {
           `task:${name === "create_task" ? context.callId : String(args.taskId)}`,
         );
       }
-      return withGoogleDataAccess(scope, () =>
+      const result = await withGoogleDataAccess(scope, () =>
         registry.execute(name, input, context),
       );
+      // A list is discovery, not a request to read every recipe's private content.
+      if (
+        !scope.protected &&
+        [
+          "list_tasks",
+          "list_runs",
+          "list_approvals",
+          "get_application_state",
+        ].includes(name)
+      ) {
+        return this.discoveryResult(result);
+      }
+      if (localContent.has(name) && this.containsProtectedReference(result))
+        scope.protect();
+      return result;
     };
     const definitions = registry.definitions.map((definition) => ({
       ...definition,

@@ -3331,6 +3331,46 @@ main {
   font-weight: 650;
 }
 
+.model-zdr-toggle {
+  appearance: none;
+  position: relative;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 24%, var(--bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 8%, transparent);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.model-zdr-toggle > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px #0003;
+  transition: transform 120ms ease;
+}
+
+.model-zdr-toggle[aria-checked="true"] {
+  background: var(--accent);
+}
+
+.model-zdr-toggle[aria-checked="true"] > span {
+  transform: translateX(14px);
+}
+
+.model-zdr-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .model-catalog-panel {
   overflow: visible;
 }
@@ -6004,4 +6044,11 @@ main {
 .model-picker .combo-option[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.provider-google-data {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
 }

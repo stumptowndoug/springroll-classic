@@ -177,7 +177,7 @@ export class OpenRouterModelConnection {
   async loadModel(
     credentialRef: string,
     modelId = defaultOpenRouterModelId,
-    googleData = false,
+    googleData: boolean | (() => boolean) = false,
   ): Promise<ReturnType<OpenRouterProvider["chat"]>> {
     return (await this.loadAgentRuntime(credentialRef, modelId, googleData))
       .model;
@@ -216,7 +216,7 @@ export class OpenRouterModelConnection {
   async loadAgentRuntime(
     credentialRef: string,
     modelId = defaultOpenRouterModelId,
-    googleData = false,
+    googleData: boolean | (() => boolean) = false,
   ): Promise<OpenRouterAgentRuntime> {
     const apiKey = await this.credentials.get(credentialRef);
     if (!apiKey) {
@@ -225,30 +225,29 @@ export class OpenRouterModelConnection {
       );
     }
 
-    const inferenceFetch: FetchApi = googleData
-      ? async (input, init) => {
-          if (
-            String(input) !== "https://openrouter.ai/api/v1/chat/completions" ||
-            typeof init?.body !== "string"
-          ) {
-            throw new ToolPolicyError(
-              "Unsupported Google-data inference request",
-            );
-          }
-          const body = protectGoogleInferenceBody(init.body);
-          this.#onGoogleDataRequest?.({
-            modelId,
-            endpoint: "https://openrouter.ai/api/v1/chat/completions",
-          });
-          const response = await this.#fetch(input, { ...init, body });
-          if (response.status === 404 || response.status === 503) {
-            throw new ToolPolicyError(
-              `OpenRouter could not serve ${modelId} with ZDR enforced. Choose another model with a ZDR endpoint or try again later. Privacy protection was not relaxed.`,
-            );
-          }
-          return response;
-        }
-      : this.#fetch;
+    const protectedRequest = () =>
+      typeof googleData === "function" ? googleData() : googleData;
+    const inferenceFetch: FetchApi = async (input, init) => {
+      if (!protectedRequest()) return this.#fetch(input, init);
+      if (
+        String(input) !== "https://openrouter.ai/api/v1/chat/completions" ||
+        typeof init?.body !== "string"
+      ) {
+        throw new ToolPolicyError("Unsupported Google-data inference request");
+      }
+      const body = protectGoogleInferenceBody(init.body);
+      this.#onGoogleDataRequest?.({
+        modelId,
+        endpoint: "https://openrouter.ai/api/v1/chat/completions",
+      });
+      const response = await this.#fetch(input, { ...init, body });
+      if (response.status === 404 || response.status === 503) {
+        throw new ToolPolicyError(
+          `This OpenRouter model can’t currently be used with your Google data. To meet Google’s data-use policies, choose a different model marked “ZDR available,” then try again.`,
+        );
+      }
+      return response;
+    };
     const usage = new OpenRouterProviderUsage();
     const provider = createOpenRouter({
       apiKey,
@@ -263,7 +262,7 @@ export class OpenRouterModelConnection {
           include: true,
         },
       }),
-      providerTools: googleData
+      providerTools: protectedRequest()
         ? {}
         : {
             [webSearchProviderToolCapability]: {

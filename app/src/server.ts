@@ -68,6 +68,7 @@ import {
 } from "./server/execution-settings.ts";
 import {
   currentGoogleDataAccess,
+  type GoogleDataAccess,
   GoogleDataProtection,
   isGoogleConnection,
   withGoogleDataAccess,
@@ -348,10 +349,11 @@ async function runAgent(
   }
 
   if (execution.providerId === "openrouter") {
+    const scope = currentGoogleDataAccess();
     const runtime = await models.loadAgentRuntime(
       openRouterCredentialRef,
       execution.modelId,
-      currentGoogleDataAccess()?.eligible === true,
+      () => scope?.protected === true,
     );
     return new AiSdkAgentRunner(runtime.model, {
       artifactReader: artifacts,
@@ -423,10 +425,15 @@ async function runAgent(
   }).run(request);
 }
 
-const loadAssistantRuntime = async (selection?: {
-  readonly providerId: string;
-  readonly modelId: string;
-}) => {
+const loadAssistantRuntime = async (
+  selection:
+    | {
+        readonly providerId: string;
+        readonly modelId: string;
+      }
+    | undefined,
+  googleData: () => boolean,
+) => {
   const execution = await resolveModelExecution(selection, [], true);
   const catalog = await modelCatalog.read().catch(
     (): ModelCatalogSnapshot => ({
@@ -482,7 +489,7 @@ const loadAssistantRuntime = async (selection?: {
       model: await models.loadModel(
         openRouterCredentialRef,
         execution.modelId,
-        true,
+        googleData,
       ),
       provider: execution.providerId,
       modelId: execution.modelId,
@@ -593,12 +600,17 @@ const assistant = new AiSdkAssistant(localDatabase.db, {
     propose_connection: "connection_setup",
   },
   loadRuntime: async (selection, context) => {
-    const runtime = await loadAssistantRuntime(selection);
+    let requestScope: GoogleDataAccess | undefined;
+    const runtime = await loadAssistantRuntime(
+      selection,
+      () => requestScope?.protected === true,
+    );
     const scope = googleProtection.scope(
       `chat:${context?.sessionId ?? "unscoped"}`,
       runtime.provider,
       runtime.modelId,
     );
+    requestScope = scope;
     const guardedTools = googleProtection.registry(applicationTools, scope);
     const approvalPolicies = Object.fromEntries([
       ...applicationTools.definitions.map(

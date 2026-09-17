@@ -28,7 +28,7 @@ const productName = release ? "Springroll" : "Springroll Prototype";
 const identifier = release
   ? "com.springroll.desktop"
   : "com.springroll.desktop.prototype";
-const version = "0.1.4";
+const version = "0.1.5";
 const buildNumber = process.env.SPRINGROLL_BUILD_NUMBER || "1";
 if (!/^\d+$/.test(buildNumber)) throw new Error("Build number must be numeric");
 const oauth: Record<string, string> = {};

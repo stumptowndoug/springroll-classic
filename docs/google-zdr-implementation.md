@@ -1,13 +1,26 @@
 # Google data protection via OpenRouter
 
+September 17 direct-provider update: The manual direct-API confirmation gate has been removed.
+No-training account settings and paid Gemini are documented requirements, not
+automatically verified conditions. See the
+evidence packet for current behavior; earlier OpenRouter-only notes below are historical.
+
+September 17 submission update: public privacy/Limited Use disclosures are now
+live. See the private local verification evidence packet
+for dated endpoint inventory, configuration evidence and remaining account checks.
+The historical implementation notes below do not supersede that packet.
+
 Implementation branch: `feat/google-openrouter-zdr`, September 16, 2026.
 Google's September 15 reply conditionally accepted enforced ZDR routing. This
 implementation is not an approval, verification submission, or deployment.
 
 ## OpenRouter inference routing
 
-Springroll enforces `provider.zdr: true` at the final inference HTTP boundary,
-after SDK options are merged. OpenRouter maintains endpoint eligibility and routes
+Springroll enforces `provider.zdr: true` at the final inference HTTP boundary
+only when the current chat/recipe is protected, after SDK options are merged.
+The flag is evaluated per request, so a Google tool can mark an active chat before
+its result enters the next model request. Ordinary OpenRouter work does not have
+Springroll-imposed ZDR; account-level OpenRouter settings can still enforce it. OpenRouter maintains endpoint eligibility and routes
 the user's selected model only to eligible endpoints. There is no Springroll model
 or hosting-provider whitelist and no dependency on a separate inventory preflight.
 ZDR applies to eligible provider/model fallbacks too; Springroll never retries with
@@ -70,14 +83,17 @@ does not remove protection. Failed calls may conservatively protect a conversati
   distillation remains disabled for protected content; ordinary research itself
   works without that secondary model. OpenRouter hosted plugins remain excluded
   because their data handling is outside inference ZDR coverage.
-- Shared local lists can contain Google-derived account labels, recipe names,
-  prompts and summaries. These reads conservatively require and persist protection
-  whenever Google connections or protected content exist. Consequently, unrelated
-  workspace-management requests may also require an OpenRouter model with enforced ZDR.
-- Older chats and recipes have no trustworthy provenance, including after a Google
-  account was removed. Migration 0035 conservatively protects **all existing chats
-  and recipes**. New separate work can use other providers. This compatibility cost
-  should be reviewed before release; do not silently remove protection to improve UX.
+- Local task/run detail reads check the referenced record before execution.
+  General inventories in unprotected conversations omit protected record contents
+  and return IDs with an explicit detail-access notice. Listing recipes/runs does
+  not itself activate ZDR. Once a conversation is protected, full inventories may
+  be returned through its protected route. Unrelated discovery remains unrestricted.
+- Migration 0035 creates empty protection/audit tables. It does not classify
+  existing customer chats or recipes, change their models, or change schedules.
+  Google-enabled recipes are protected at execution; connector access and explicit
+  reads of protected content persist protection for subsequent model calls.
+  Historical Google-derived content from before tracking began is not automatically
+  classified; this change does not claim retrospective provenance coverage.
 - Ordinary user exports and manual copying outside Springroll are outside this
   automatic boundary. The app does not control independent external software or
   retrospectively erase data sent by older builds.
@@ -123,3 +139,39 @@ The direct-provider assumption was not sufficient to enable every account: API
 training opt-ins, Gemini paid-service status, and endpoint features must be handled
 before expanding Google-data eligibility. Direct providers remain available for
 non-Google work; this revision only removes the OpenRouter whitelist.
+
+## Scoped routing revision
+
+Checkpoint before this revision: `e23c1cf`. Chat runtimes capture their own mutable
+protection scope; recipe runtimes capture the active execution scope. Each final
+OpenRouter request evaluates that scope independently. The scope becomes protected
+before a Google connector returns data or explicitly requested protected local details are returned,
+and its persistent marker governs subsequent turns and scheduled executions.
+
+The unreleased migration-0035 blanket backfill was removed after it caused unrelated
+Neon and public-web recipes to require ZDR. Customer upgrades now start with empty
+protection tables. The upgrade regression seeds existing recipes and a chat, applies
+0035, and verifies that no records are marked and recipe settings are unchanged.
+Runtime regressions separately verify scope isolation, derived-content protection,
+and ZDR activation before Google results reach the model.
+
+Prototype databases that already applied the earlier migration retain their test
+markers; editing an unreleased migration does not rerun it. Per the user's request,
+this revision leaves those existing test recipes alone. Actual access refreshes
+marker timestamps. No blanket deletion or historical-content heuristic is added.
+
+September 17 local repair: reviewed the Daily AssessorSearch Skip Trace Usage Report,
+its creation conversation, referenced reports, and historical tool calls. Its
+Neon-only execution had a migration-0035 marker, which incorrectly forced ZDR before
+the first tool call. Backed up and removed that one marker in the prototype database;
+other historical markers remain for individual provenance review. Existing failed
+run records are preserved. Focused regressions cover marker refresh, non-Google
+recipe isolation, and protection becoming active on subsequent Google access.
+
+September 17 running-state correction: the later user report confirmed that leaving
+prototype state unchanged kept the false failures visible. Reviewed and backed up
+the remaining non-Google recipe markers and related creation/edit chats, then
+removed those mistaken markers. The live GitHub retry reached OpenRouter without
+the Google-policy failure; it failed separately with upstream Qwen HTTP 429 after
+three attempts. No model selection or schedule was changed. Other protected
+records were preserved. No completed report is claimed by this verification.

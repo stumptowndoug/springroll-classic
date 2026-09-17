@@ -11,7 +11,8 @@
       "!!coverage",
       "!!docs/design",
       "!!docs/legacy-spring-roll",
-      "!!drizzle"
+      "!!drizzle",
+      "!!docs/google-verification-evidence/openrouter-zdr-endpoints.json"
     ]
   },
   "formatter": {

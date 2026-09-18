@@ -66,8 +66,6 @@ Earlier backlog, partial work, and completed history are preserved in [the Septe
 
 ## 🚧 In Progress
 
-- [ ] Publish v0.1.5 Google data routing beta
-  - [ ] Commit, pass checks, merge PR, sign/notarize artifacts, publish release and update website.
 
 - [ ] Upload verification recordings and resubmit Google OAuth review
   - [x] User uploaded both videos as unlisted; verified URLs and prepared reply plus evidence ZIP in Downloads/Springroll-Google-Verification.
@@ -195,6 +193,11 @@ Earlier backlog, partial work, and completed history are preserved in [the Septe
   - Policy and acceptance handoff: [docs/missed-run-policy.md](docs/missed-run-policy.md). Keep this card open until device acceptance; do not silently treat simulated downtime as Mac sleep verification.
 
 ## ✅ Done
+
+- [x] Publish v0.1.5 Google data routing beta
+  - PR #22 merged as `0402223`; PR/main CI and CodeQL passed. 774 tests, four snapshots and four Rust tests passed.
+  - Build 10 app and DMG signed/notarized, isolated startup/restart and installer checks passed; all three uploaded asset sizes and SHA-256 digests verified.
+  - Published v0.1.5 prerelease with DMG, ZIP and checksums; website PR #5 updates downloads and privacy disclosures.
 
 - [x] Remove the manual direct-provider confirmation gate
   - Direct API routes no longer require an attestation checkbox; Gemini billing/no-training requirements remain guidance and are not automatically verified. OpenRouter ZDR stays enforced. Removed unused UI/API handlers; legacy schema column retained for existing DB compatibility. 125 focused tests/typecheck passed; prototype rebuilt; privacy/evidence text corrected.

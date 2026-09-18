@@ -1,6 +1,6 @@
 # GitHub releases
 
-v0.1.5 is the next Mac friends-beta, build 10. It adds Google-scoped OpenRouter
+[v0.1.5](https://github.com/stumptowndoug/springroll/releases/tag/v0.1.5) is published as Mac friends-beta build 10. It adds Google-scoped OpenRouter
 ZDR enforcement, clearer Gmail discovery, a model filter, and compatibility checks
 for installed subscription runtimes. Direct API providers remain available without
 a manual confirmation gate. Google OAuth verification remains pending.

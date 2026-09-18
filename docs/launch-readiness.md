@@ -1,10 +1,43 @@
 # Launch readiness
 
-Reviewed 2026-09-08. The active checklist is [TODO.md](../TODO.md); this note
+Reviewed 2026-09-17. The active checklist is [TODO.md](../TODO.md); this note
 explains sequencing and dependencies. Open board items are unverified, not
 proof that every underlying behavior is broken.
 
-## Current Mac release: v0.1.4
+## Current Mac release: v0.1.5
+
+Build 10 is based on PR #22, merged as `0402223`. It adds Google-scoped OpenRouter
+ZDR enforcement, direct API access without a manual confirmation gate, model
+filter/search improvements, Gmail discovery fixes and installed subscription
+runtime compatibility checks. Google OAuth verification remains pending.
+PR and merged-main CI/CodeQL passed. Local checks passed 774 tests, four snapshots,
+four Rust tests, lint, types, frontend build and high-severity dependency audit.
+
+Artifact directory: `desktop/dist/release-vLasUT/`. The release tree matches the
+merged revision. Apple accepted app submission
+`c0733bec-2ec9-409c-8c24-05da3093ceb3` and DMG submission
+`3b5faf01-737c-45fa-83ce-5810fa98c39e`. Both tickets were stapled/validated and
+Gatekeeper accepted both. Mounted app signature/ticket, app identity, icon,
+layout metadata and Applications shortcut passed inspection. The signed packaged
+runtime passed isolated startup/restart, paused starter recipe, assets and
+subscription setup endpoint checks. Different-Mac and live scheduled-run
+acceptance remain open; these checks made no live provider calls.
+
+All 1,728 dependency links resolve within the bundle. The production identifier
+remains `com.springroll.desktop`. Private evidence and workspace files are excluded;
+only allowlisted installed-client OAuth configuration is packaged. Credential
+pattern scans of tracked source, Git history and packaged first-party source found
+no matches; these scans are not a guarantee that every secret format is detected.
+
+- DMG: 145,392,827 bytes; SHA-256 `465e59cc4aaf45a8a66118fd90ec2581899cb49206855f5d9e55598109995a2f`.
+- ZIP: 175,415,629 bytes; SHA-256 `4292a234326d079687514ad11b092f7b4c04f65a04bca3f567abba3218f46d17`.
+
+[v0.1.5 downloads](https://github.com/stumptowndoug/springroll/releases/tag/v0.1.5)
+provide the DMG, ZIP and SHA256SUMS.txt. Uploaded sizes and SHA-256 digests match
+the local artifacts. Website PR #5 updates downloads and identifies
+v0.1.5 as the first public build containing the documented routing controls.
+
+## Previous v0.1.4 release
 
 Build 9 is based on PR #20, merged as `dc7999f`. It adds compact chat approvals,
 durable subscription decisions, incomplete-call validation, and current native

@@ -9,7 +9,7 @@
   "dependencies": {
     "@ai-sdk/openai": "4.0.24",
     "@springroll/kernel": "workspace:*",
-    "ai": "7.0.42",
+    "ai": "7.0.92",
     "drizzle-orm": "0.45.2",
     "rivetkit": "^2.0.0"
   }

@@ -16,7 +16,7 @@
     "@napi-rs/keyring": "1.3.0",
     "@openai/codex-sdk": "0.153.2",
     "@openrouter/ai-sdk-provider": "3.0.0",
-    "ai": "7.0.42",
+    "ai": "7.0.92",
     "croner": "10.0.1",
     "drizzle-orm": "0.45.2",
     "rivetkit": "2.3.10",
